@@ -8,15 +8,19 @@ import Chat from "@/components/Chat";
 // Route: /
 // Description: Landing page with 3D avatar and chat interface
 // Purpose: Display a 3D avatar on the left and chat interface on the right
+
+// Configuration: Avatar talking duration
+const TALKING_DURATION_MS = 3000; // Duration in milliseconds (3 seconds)
+
 export default function Home() {
   const [isTalking, setIsTalking] = useState(false);
 
   const handleBotMessage = () => {
     setIsTalking(true);
-    // Stop talking after 3 seconds (adjust based on message length)
+    // Stop talking after configured duration
     setTimeout(() => {
       setIsTalking(false);
-    }, 3000);
+    }, TALKING_DURATION_MS);
   };
 
   return (

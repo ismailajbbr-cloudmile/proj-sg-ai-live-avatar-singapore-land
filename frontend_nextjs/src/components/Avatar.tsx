@@ -61,9 +61,29 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
   const NECK_ROTATION_Y = 0; // Side to side rotation (positive = turn right, negative = turn left)
   const NECK_ROTATION_Z = 0; // Tilt rotation (positive = tilt right, negative = tilt left)
 
-  // Mouth animation settings - adjust these to control mouth movement using morph targets
-  const MOUTH_OPEN_INTENSITY = 0.7; // Mouth opening intensity (0 = no movement, 1.0 = full opening)
-  const MOUTH_OPEN_SPEED = 3; // Speed of mouth opening/closing animation
+  // Idle mouth shape - set the default mouth position when not talking
+  // You can use values from 0-1, or reference a viseme name from CUSTOM_VISEMES
+  const IDLE_MOUTH_OPEN = 0; // Idle mouthOpen value (0 = closed, 1.0 = fully open)
+  const IDLE_MOUTH_SMILE = 0; // Idle mouthSmile value (0 = no smile, 1.0 = full smile)
+  
+  // Mouth animation settings - using morph targets (mouthOpen, mouthSmile)
+  const MOUTH_INTENSITY = 1.5; // Mouth movement intensity (0 = no movement, 1.0 = full movement)
+  const MOUTH_SPEED = 3; // Speed of mouth animation (higher = faster speech)
+  
+  // Custom visemes built from mouthOpen and mouthSmile combinations
+  // Each viseme is defined as [mouthOpen, mouthSmile] where values are 0-1
+  const CUSTOM_VISEMES = [
+    { name: "silence", open: 0.0, smile: 0.0 },      // Silence/rest
+    { name: "closed", open: 0.1, smile: 0.0 },        // M, P, B (closed lips)
+    { name: "narrow", open: 0.3, smile: 0.2 },        // F, V (narrow opening)
+    { name: "wide", open: 0.8, smile: 0.1 },         // A, O (wide open)
+    { name: "smile_open", open: 0.6, smile: 0.7 },    // E, I (smile with opening)
+    { name: "open", open: 0.7, smile: 0.0 },         // U, OO (round open)
+    { name: "smile", open: 0.2, smile: 0.8 },        // E, EE (wide smile)
+    { name: "narrow_open", open: 0.5, smile: 0.1 },  // D, T, L (medium open)
+    { name: "wide_smile", open: 0.4, smile: 0.9 },   // I, Y (very wide smile)
+    { name: "round", open: 0.6, smile: 0.0 },        // O, OH (round mouth)
+  ];
 
   // Head movement during talking - adjust these to control head movement intensity
   const TALKING_HEAD_NOD_AMPLITUDE = 0.08; // Up/down nod amount (reduced from 0.2)
@@ -225,36 +245,53 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
         groupRef.current.rotation.y = Math.sin(currentTime * TALKING_HEAD_SHAKE_SPEED) * TALKING_HEAD_SHAKE_AMPLITUDE * 1.5;
       }
 
-      // Mouth animation using morph targets (blend shapes)
-      if (MOUTH_OPEN_INTENSITY > 0) {
-        const mouthOpen = Math.abs(Math.sin(currentTime * MOUTH_OPEN_SPEED)) * MOUTH_OPEN_INTENSITY;
+      // Mouth animation using custom visemes built from mouthOpen and mouthSmile
+      // Cycles through different viseme states and blends between them for smooth transitions
+      if (MOUTH_INTENSITY > 0 && headMeshRef.current && headMeshRef.current.morphTargetInfluences) {
+        const morphDict = headMeshRef.current.morphTargetDictionary || {};
         
-        // Animate head mesh morph targets
-        if (headMeshRef.current && headMeshRef.current.morphTargetInfluences) {
-          // Apply mouth opening to all morph targets on head (usually 2 targets)
-          for (let i = 0; i < headMeshRef.current.morphTargetInfluences.length; i++) {
-            headMeshRef.current.morphTargetInfluences[i] = mouthOpen;
-          }
+        // Reset all morph targets first
+        for (let i = 0; i < headMeshRef.current.morphTargetInfluences.length; i++) {
+          headMeshRef.current.morphTargetInfluences[i] = 0;
         }
         
-        // Animate teeth mesh morph targets
-        if (teethMeshRef.current && teethMeshRef.current.morphTargetInfluences) {
-          // Apply mouth opening to all morph targets on teeth (usually 2 targets)
-          for (let i = 0; i < teethMeshRef.current.morphTargetInfluences.length; i++) {
-            teethMeshRef.current.morphTargetInfluences[i] = mouthOpen;
-          }
+        // Cycle through custom visemes continuously
+        const cycleTime = currentTime * MOUTH_SPEED;
+        const visemeIndex = Math.floor(cycleTime) % CUSTOM_VISEMES.length;
+        const nextVisemeIndex = (visemeIndex + 1) % CUSTOM_VISEMES.length;
+        const blendFactor = cycleTime % 1; // 0 to 1 for blending between visemes
+        
+        const currentViseme = CUSTOM_VISEMES[visemeIndex];
+        const nextViseme = CUSTOM_VISEMES[nextVisemeIndex];
+        
+        // Interpolate between current and next viseme for smooth transition
+        const mouthOpenValue = (currentViseme.open * (1 - blendFactor) + nextViseme.open * blendFactor) * MOUTH_INTENSITY;
+        const mouthSmileValue = (currentViseme.smile * (1 - blendFactor) + nextViseme.smile * blendFactor) * MOUTH_INTENSITY;
+        
+        // Apply mouthOpen (clamped to 0-1)
+        if (morphDict["mouthOpen"] !== undefined) {
+          headMeshRef.current.morphTargetInfluences[morphDict["mouthOpen"]] = Math.min(Math.max(mouthOpenValue, 0), 1.0);
         }
-      } else {
-        // Reset morph targets when not talking
-        if (headMeshRef.current && headMeshRef.current.morphTargetInfluences) {
-          for (let i = 0; i < headMeshRef.current.morphTargetInfluences.length; i++) {
-            headMeshRef.current.morphTargetInfluences[i] = 0;
-          }
+        
+        // Apply mouthSmile (clamped to 0-1)
+        if (morphDict["mouthSmile"] !== undefined) {
+          headMeshRef.current.morphTargetInfluences[morphDict["mouthSmile"]] = Math.min(Math.max(mouthSmileValue, 0), 1.0);
         }
-        if (teethMeshRef.current && teethMeshRef.current.morphTargetInfluences) {
-          for (let i = 0; i < teethMeshRef.current.morphTargetInfluences.length; i++) {
-            teethMeshRef.current.morphTargetInfluences[i] = 0;
-          }
+      }
+      
+      // Animate teeth mesh morph targets (use mouthOpen)
+      if (teethMeshRef.current && teethMeshRef.current.morphTargetInfluences) {
+        const morphDict = teethMeshRef.current.morphTargetDictionary || {};
+        const mouthOpen = Math.abs(Math.sin(currentTime * MOUTH_SPEED * 2)) * MOUTH_INTENSITY;
+        
+        // Reset all morph targets
+        for (let i = 0; i < teethMeshRef.current.morphTargetInfluences.length; i++) {
+          teethMeshRef.current.morphTargetInfluences[i] = 0;
+        }
+        
+        // Apply mouthOpen if it exists
+        if (morphDict["mouthOpen"] !== undefined) {
+          teethMeshRef.current.morphTargetInfluences[morphDict["mouthOpen"]] = mouthOpen * 0.5;
         }
       }
 
@@ -283,38 +320,74 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
         headRef.current.scale.set(1, 1, 1);
       }
 
-      // Reset morph targets when idle
+      // Set idle mouth shape
       if (headMeshRef.current && headMeshRef.current.morphTargetInfluences) {
+        const morphDict = headMeshRef.current.morphTargetDictionary || {};
+        
+        // Reset all morph targets first
         for (let i = 0; i < headMeshRef.current.morphTargetInfluences.length; i++) {
           headMeshRef.current.morphTargetInfluences[i] = 0;
         }
+        
+        // Apply idle mouth shape
+        if (morphDict["mouthOpen"] !== undefined) {
+          headMeshRef.current.morphTargetInfluences[morphDict["mouthOpen"]] = IDLE_MOUTH_OPEN;
+        }
+        if (morphDict["mouthSmile"] !== undefined) {
+          headMeshRef.current.morphTargetInfluences[morphDict["mouthSmile"]] = IDLE_MOUTH_SMILE;
+        }
       }
       if (teethMeshRef.current && teethMeshRef.current.morphTargetInfluences) {
+        const morphDict = teethMeshRef.current.morphTargetDictionary || {};
+        
+        // Reset all morph targets
         for (let i = 0; i < teethMeshRef.current.morphTargetInfluences.length; i++) {
           teethMeshRef.current.morphTargetInfluences[i] = 0;
+        }
+        
+        // Apply idle mouth shape to teeth mesh as well
+        if (morphDict["mouthOpen"] !== undefined) {
+          teethMeshRef.current.morphTargetInfluences[morphDict["mouthOpen"]] = IDLE_MOUTH_OPEN * 0.5;
         }
       }
     }
 
     // Blink animation (applies to both idle and talking)
-    // Uses scale on eye meshes since morph targets don't have blink-specific targets
-    // Calculate blink state: blink happens during BLINK_DURATION, then waits
+    // Uses eyesClosed blend shape on head mesh (Oculus LipSync compatible)
     const timeInCycle = currentTime % BLINK_INTERVAL;
-    let blinkScale = 1.0; // 1.0 = open, 0.0 = closed
+    let blinkValue = 0; // 0 = open, 1.0 = closed
     
     if (timeInCycle < BLINK_DURATION) {
       // Blink closing and opening (smooth transition)
       const blinkProgress = timeInCycle / BLINK_DURATION; // 0 to 1
-      // Use sine wave: starts at 1 (open), goes to 0 (closed), back to 1 (open)
-      blinkScale = 1.0 - Math.sin(blinkProgress * Math.PI);
+      // Use sine wave: starts at 0 (open), goes to 1 (closed), back to 0 (open)
+      blinkValue = Math.sin(blinkProgress * Math.PI);
     }
     
-    // Apply blink scale to both eyes (scaling down closes the eyes)
-    if (leftEyeMeshRef.current) {
-      leftEyeMeshRef.current.scale.set(1, blinkScale, 1);
-    }
-    if (rightEyeMeshRef.current) {
-      rightEyeMeshRef.current.scale.set(1, blinkScale, 1);
+    // Apply blink using eyesClosed morph target on head mesh
+    if (headMeshRef.current && headMeshRef.current.morphTargetInfluences) {
+      const morphDict = headMeshRef.current.morphTargetDictionary || {};
+      
+      // Reset eyesClosed first
+      if (morphDict["eyesClosed"] !== undefined) {
+        headMeshRef.current.morphTargetInfluences[morphDict["eyesClosed"]] = blinkValue;
+      } else {
+        // Fallback: use scale on eye meshes if eyesClosed morph target doesn't exist
+        if (leftEyeMeshRef.current) {
+          leftEyeMeshRef.current.scale.set(1, 1.0 - blinkValue, 1);
+        }
+        if (rightEyeMeshRef.current) {
+          rightEyeMeshRef.current.scale.set(1, 1.0 - blinkValue, 1);
+        }
+      }
+    } else {
+      // Fallback: use scale on eye meshes if head mesh not found
+      if (leftEyeMeshRef.current) {
+        leftEyeMeshRef.current.scale.set(1, 1.0 - blinkValue, 1);
+      }
+      if (rightEyeMeshRef.current) {
+        rightEyeMeshRef.current.scale.set(1, 1.0 - blinkValue, 1);
+      }
     }
 
     // Set neck default position (applies to both idle and talking)
