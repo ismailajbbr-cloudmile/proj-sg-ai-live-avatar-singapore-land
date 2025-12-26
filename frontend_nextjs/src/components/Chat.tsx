@@ -47,6 +47,24 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
   const isRecordingRef = useRef(false);
   const messageIdRef = useRef(2);
 
+  // Determine available languages and current language
+  const getAvailableLanguages = (): string[] => {
+    if (!language) return ["en-US"];
+    if (Array.isArray(language)) return language;
+    return [language];
+  };
+
+  const availableLanguages = getAvailableLanguages();
+  const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
+  const currentLanguage = availableLanguages[currentLanguageIndex];
+
+  // Reset language index when available languages change
+  useEffect(() => {
+    if (currentLanguageIndex >= availableLanguages.length) {
+      setCurrentLanguageIndex(0);
+    }
+  }, [availableLanguages.length, currentLanguageIndex]);
+
   const handleSend = (textToSend?: string) => {
     const text = textToSend || input;
     if (!text.trim()) return;
@@ -93,20 +111,10 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
     if (SpeechRecognition) {
       setIsSupported(true);
       
-      // Normalize language prop to comma-separated string
-      let languageString: string;
-      if (!language) {
-        languageString = "en-US";
-      } else if (Array.isArray(language)) {
-        languageString = language.join(",");
-      } else {
-        languageString = language;
-      }
-      
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
       recognition.interimResults = false;
-      recognition.lang = languageString;
+      recognition.lang = currentLanguage;
 
       recognition.onresult = (event: any) => {
         const transcript = event.results[0][0].transcript;
@@ -135,7 +143,25 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
         recognitionRef.current.stop();
       }
     };
-  }, [language]);
+  }, [currentLanguage]);
+
+  // Toggle between available languages
+  const toggleLanguage = () => {
+    if (availableLanguages.length > 1) {
+      setCurrentLanguageIndex((prev) => (prev + 1) % availableLanguages.length);
+    }
+  };
+
+  // Get language display name
+  const getLanguageName = (lang: string): string => {
+    const langMap: Record<string, string> = {
+      "en-US": "English",
+      "zh-CN": "中文 (简体)",
+      "zh-TW": "中文 (繁體)",
+      "zh-HK": "中文 (香港)",
+    };
+    return langMap[lang] || lang;
+  };
 
   const startRecording = useCallback(() => {
     if (recognitionRef.current && !isRecordingRef.current) {
@@ -251,6 +277,15 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
             placeholder="Type your message..."
             className="flex-1 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:placeholder-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-zinc-600"
           />
+          {isSupported && availableLanguages.length > 1 && (
+            <button
+              onClick={toggleLanguage}
+              className="rounded-lg border border-zinc-300 bg-white px-4 py-2 text-sm font-medium text-zinc-700 transition-colors hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-300 dark:hover:bg-zinc-700"
+              title={`Current language: ${getLanguageName(currentLanguage)}. Click to switch.`}
+            >
+              {getLanguageName(currentLanguage)}
+            </button>
+          )}
           {isSupported && (
             <button
               onMouseDown={handlePushToTalkStart}
@@ -307,6 +342,9 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
         {isSupported && (
           <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
             💡 Hold the button or press Space to record your message
+            {availableLanguages.length > 1 && (
+              <> • Current language: <strong>{getLanguageName(currentLanguage)}</strong> (click language button to switch)</>
+            )}
           </p>
         )}
         {!isSupported && (

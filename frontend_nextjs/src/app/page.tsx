@@ -33,7 +33,8 @@ export default function Home() {
       {/* Right Side - Chat */}
       <div className="w-1/2">
         <Chat onBotMessage={handleBotMessage} 
-         language={["zh-CN"]} 
+         language={["en-US", "zh-CN"]} 
+        //  language={["zh-CN"]} 
         //  language={["en-US"]} 
         />
       </div>
