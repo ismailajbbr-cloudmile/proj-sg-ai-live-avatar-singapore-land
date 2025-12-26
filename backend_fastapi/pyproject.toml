@@ -1,0 +1,14 @@
+[project]
+name = "backend-fastapi"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "fastapi>=0.127.0",
+    "itsdangerous>=2.2.0",
+    "python-dotenv>=1.2.1",
+    "slowapi>=0.1.9",
+    "structlog>=25.5.0",
+    "uvicorn>=0.40.0",
+]
