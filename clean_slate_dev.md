@@ -52,6 +52,7 @@ npm i react-use
 
 # Redner 3D avatar
 npm i three @react-three/fiber @react-three/drei
+npm install @react-three/fiber @react-three/drei three
 ```
 
 ### 3. Backend Setup
