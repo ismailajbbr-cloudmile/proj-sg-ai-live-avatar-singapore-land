@@ -9,20 +9,11 @@ interface Message {
   timestamp: Date;
 }
 
-// Format time consistently to avoid hydration mismatches
-function formatTime(date: Date): string {
-  const hours = date.getHours().toString().padStart(2, "0");
-  const minutes = date.getMinutes().toString().padStart(2, "0");
-  return `${hours}:${minutes}`;
-}
-
 interface ChatProps {
   onBotMessage?: () => void;
-  language?: string | string[]; // Language code(s) for speech recognition
-  // Examples: "en-US", "zh-CN", ["en-US", "zh-CN"], "en-US,zh-CN"
+  language?: string | string[];
 }
 
-// Speech Recognition types
 declare global {
   interface Window {
     webkitSpeechRecognition: any;
@@ -30,7 +21,31 @@ declare global {
   }
 }
 
+const LANGUAGE_NAMES: Record<string, string> = {
+  "en-US": "English",
+  "zh-CN": "中文 (简体)",
+  "zh-TW": "中文 (繁體)",
+  "zh-HK": "中文 (香港)",
+};
+
+function formatTime(date: Date): string {
+  const hours = date.getHours().toString().padStart(2, "0");
+  const minutes = date.getMinutes().toString().padStart(2, "0");
+  return `${hours}:${minutes}`;
+}
+
+function getAvailableLanguages(language?: string | string[]): string[] {
+  if (!language) return ["en-US"];
+  if (Array.isArray(language)) return language;
+  return [language];
+}
+
+function getLanguageName(lang: string): string {
+  return LANGUAGE_NAMES[lang] || lang;
+}
+
 export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
+  // State
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -42,29 +57,123 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
+  const [ttsSupported, setTtsSupported] = useState(false);
+  const [ttsEnabled, setTtsEnabled] = useState(true);
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [selectedVoiceName, setSelectedVoiceName] = useState<string>("");
+  const [isVoiceManuallySelected, setIsVoiceManuallySelected] = useState(false);
+
+  // Refs
   const recognitionRef = useRef<any>(null);
+  const synthRef = useRef<SpeechSynthesis | null>(null);
+  const selectedVoiceNameRef = useRef<string>("");
   const isPressingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const messageIdRef = useRef(2);
 
-  // Determine available languages and current language
-  const getAvailableLanguages = (): string[] => {
-    if (!language) return ["en-US"];
-    if (Array.isArray(language)) return language;
-    return [language];
-  };
-
-  const availableLanguages = getAvailableLanguages();
+  // Language management
+  const availableLanguages = getAvailableLanguages(language);
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
   const currentLanguage = availableLanguages[currentLanguageIndex];
 
-  // Reset language index when available languages change
+  // Initialize speech synthesis
   useEffect(() => {
-    if (currentLanguageIndex >= availableLanguages.length) {
-      setCurrentLanguageIndex(0);
-    }
-  }, [availableLanguages.length, currentLanguageIndex]);
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
 
+    synthRef.current = window.speechSynthesis;
+    setTtsSupported(true);
+
+    const loadVoices = () => {
+      const availableVoices = synthRef.current?.getVoices() || [];
+      setVoices(availableVoices);
+    };
+
+    loadVoices();
+    synthRef.current.addEventListener("voiceschanged", loadVoices);
+
+    return () => {
+      synthRef.current?.removeEventListener("voiceschanged", loadVoices);
+    };
+  }, []);
+
+  // Auto-select voice when language or voices change
+  useEffect(() => {
+    if (voices.length === 0 || !currentLanguage) return;
+
+    const langPrefix = currentLanguage.split("-")[0];
+
+    setSelectedVoiceName((prevName) => {
+      const currentVoice = voices.find((v) => v.name === prevName);
+      const currentVoiceMatches = currentVoice?.lang.startsWith(langPrefix);
+
+      if (!isVoiceManuallySelected || !currentVoiceMatches) {
+        const matchingVoice =
+          voices.find((voice) => voice.lang.startsWith(langPrefix)) || voices[0];
+        if (matchingVoice) {
+          setIsVoiceManuallySelected(false);
+          selectedVoiceNameRef.current = matchingVoice.name;
+          return matchingVoice.name;
+        }
+      }
+      return prevName;
+    });
+  }, [currentLanguage, voices, isVoiceManuallySelected]);
+
+  // Keep ref in sync with state
+  useEffect(() => {
+    selectedVoiceNameRef.current = selectedVoiceName;
+  }, [selectedVoiceName]);
+
+  // Text-to-speech function
+  const speakText = useCallback(
+    (text: string) => {
+      if (!ttsEnabled || !synthRef.current) return;
+
+      synthRef.current.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.lang = currentLanguage;
+      utterance.rate = 1.0;
+      utterance.pitch = 1.0;
+      utterance.volume = 1.0;
+
+      const availableVoices = synthRef.current.getVoices();
+      if (availableVoices.length > 0) {
+        const selectedName = selectedVoiceNameRef.current;
+        let voiceToUse =
+          availableVoices.find((v) => v.name === selectedName) || null;
+
+        if (!voiceToUse) {
+          const langPrefix = currentLanguage.split("-")[0];
+          voiceToUse =
+            availableVoices.find((v) => v.lang.startsWith(langPrefix)) ||
+            availableVoices[0];
+        }
+
+        if (voiceToUse) {
+          utterance.voice = voiceToUse;
+        }
+      }
+
+      synthRef.current.speak(utterance);
+    },
+    [ttsEnabled, currentLanguage]
+  );
+
+  // Cleanup TTS on unmount or disable
+  useEffect(() => {
+    return () => {
+      synthRef.current?.cancel();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!ttsEnabled) {
+      synthRef.current?.cancel();
+    }
+  }, [ttsEnabled]);
+
+  // Message handling
   const handleSend = (textToSend?: string) => {
     const text = textToSend || input;
     if (!text.trim()) return;
@@ -81,7 +190,6 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
       setInput("");
     }
 
-    // Simulate bot response
     setTimeout(() => {
       const botResponse: Message = {
         id: messageIdRef.current++,
@@ -90,79 +198,52 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
         timestamp: new Date(),
       };
       setMessages((prev) => [...prev, botResponse]);
-      
-      // Trigger talking animation
-      if (onBotMessage) {
-        onBotMessage();
-      }
+
+      onBotMessage?.();
+      speakText(botResponse.text);
     }, 500);
   };
 
-  const handleKeyPress = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter") {
-      handleSend();
-    }
-  };
-
-  // Initialize speech recognition
+  // Speech recognition initialization
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-    
-    if (SpeechRecognition) {
-      setIsSupported(true);
-      
-      const recognition = new SpeechRecognition();
-      recognition.continuous = false;
-      recognition.interimResults = false;
-      recognition.lang = currentLanguage;
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
 
-      recognition.onresult = (event: any) => {
-        const transcript = event.results[0][0].transcript;
-        if (transcript.trim()) {
-          // Send the transcript directly
-          handleSend(transcript);
-        }
-      };
+    if (!SpeechRecognition) return;
 
-      recognition.onerror = (event: any) => {
-        console.error("Speech recognition error:", event.error);
-        isRecordingRef.current = false;
-        setIsRecording(false);
-      };
+    setIsSupported(true);
 
-      recognition.onend = () => {
-        isRecordingRef.current = false;
-        setIsRecording(false);
-      };
+    const recognition = new SpeechRecognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = currentLanguage;
 
-      recognitionRef.current = recognition;
-    }
+    recognition.onresult = (event: any) => {
+      const transcript = event.results[0][0].transcript;
+      if (transcript.trim()) {
+        handleSend(transcript);
+      }
+    };
+
+    recognition.onerror = (event: any) => {
+      console.error("Speech recognition error:", event.error);
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    };
+
+    recognition.onend = () => {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    };
+
+    recognitionRef.current = recognition;
 
     return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
+      recognitionRef.current?.stop();
     };
   }, [currentLanguage]);
 
-  // Toggle between available languages
-  const toggleLanguage = () => {
-    if (availableLanguages.length > 1) {
-      setCurrentLanguageIndex((prev) => (prev + 1) % availableLanguages.length);
-    }
-  };
-
-  // Get language display name
-  const getLanguageName = (lang: string): string => {
-    const langMap: Record<string, string> = {
-      "en-US": "English",
-      "zh-CN": "中文 (简体)",
-      "zh-TW": "中文 (繁體)",
-      "zh-HK": "中文 (香港)",
-    };
-    return langMap[lang] || lang;
-  };
-
+  // Recording controls
   const startRecording = useCallback(() => {
     if (recognitionRef.current && !isRecordingRef.current) {
       try {
@@ -199,7 +280,7 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
     }
   };
 
-  // Handle keyboard shortcut (Space bar for push-to-talk)
+  // Keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.code === "Space" && e.target === document.body) {
@@ -224,16 +305,73 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
     };
   }, []);
 
+  // Language toggle
+  const toggleLanguage = () => {
+    if (availableLanguages.length > 1) {
+      setCurrentLanguageIndex((prev) => (prev + 1) % availableLanguages.length);
+      setIsVoiceManuallySelected(false);
+    }
+  };
+
+  // Voice selection helpers
+  const filteredVoices = voices.filter((voice) => {
+    const langPrefix = currentLanguage.split("-")[0];
+    return voice.lang.startsWith(langPrefix);
+  });
+
+  const handleVoiceChange = (newVoiceName: string) => {
+    setSelectedVoiceName(newVoiceName);
+    selectedVoiceNameRef.current = newVoiceName;
+    setIsVoiceManuallySelected(true);
+  };
+
   return (
     <div className="flex h-full flex-col bg-white dark:bg-zinc-900">
-      {/* Chat Header */}
+      {/* Header */}
       <div className="border-b border-zinc-200 px-6 py-4 dark:border-zinc-800">
-        <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-          Chat
-        </h2>
+        <div className="flex items-center justify-between">
+          <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
+            Chat
+          </h2>
+          {ttsSupported && (
+            <div className="flex items-center gap-2">
+              {ttsEnabled && filteredVoices.length > 0 && (
+                <select
+                  value={selectedVoiceName || filteredVoices[0].name}
+                  onChange={(e) => handleVoiceChange(e.target.value)}
+                  className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-900 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:focus:border-zinc-600 dark:focus:ring-zinc-600"
+                  title="Select voice"
+                >
+                  {filteredVoices.map((voice) => (
+                    <option key={voice.name} value={voice.name}>
+                      {voice.name}
+                      {voice.lang !== currentLanguage && ` (${voice.lang})`}
+                    </option>
+                  ))}
+                </select>
+              )}
+              <button
+                onClick={() => {
+                  setTtsEnabled(!ttsEnabled);
+                  if (!ttsEnabled) {
+                    synthRef.current?.cancel();
+                  }
+                }}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  ttsEnabled
+                    ? "bg-blue-100 text-blue-700 hover:bg-blue-200 dark:bg-blue-900 dark:text-blue-300 dark:hover:bg-blue-800"
+                    : "bg-zinc-100 text-zinc-600 hover:bg-zinc-200 dark:bg-zinc-800 dark:text-zinc-400 dark:hover:bg-zinc-700"
+                }`}
+                title={ttsEnabled ? "Text-to-speech enabled" : "Text-to-speech disabled"}
+              >
+                {ttsEnabled ? "🔊 TTS On" : "🔇 TTS Off"}
+              </button>
+            </div>
+          )}
+        </div>
       </div>
 
-      {/* Messages Area */}
+      {/* Messages */}
       <div className="flex-1 overflow-y-auto px-6 py-4">
         <div className="flex flex-col gap-4">
           {messages.map((message) => (
@@ -273,7 +411,7 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
             type="text"
             value={input}
             onChange={(e) => setInput(e.target.value)}
-            onKeyPress={handleKeyPress}
+            onKeyPress={(e) => e.key === "Enter" && handleSend()}
             placeholder="Type your message..."
             className="flex-1 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:placeholder-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-zinc-600"
           />
@@ -343,7 +481,11 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
           <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
             💡 Hold the button or press Space to record your message
             {availableLanguages.length > 1 && (
-              <> • Current language: <strong>{getLanguageName(currentLanguage)}</strong> (click language button to switch)</>
+              <>
+                {" "}
+                • Current language: <strong>{getLanguageName(currentLanguage)}</strong> (click
+                language button to switch)
+              </>
             )}
           </p>
         )}
@@ -356,4 +498,3 @@ export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
     </div>
   );
 }
-
