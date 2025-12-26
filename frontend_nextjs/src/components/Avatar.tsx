@@ -88,7 +88,7 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
   const IDLE_MOUTH_SMILE = 0.2; // Idle mouthSmile value (0 = no smile, 1.0 = full smile)
   
   // Mouth animation settings - using morph targets (mouthOpen, mouthSmile)
-  const MOUTH_INTENSITY = 1.5; // Mouth movement intensity (0 = no movement, 1.0 = full movement)
+  const MOUTH_INTENSITY = 3; // Mouth movement intensity (0 = no movement, 1.0 = full movement)
   const MOUTH_SPEED = 3; // Speed of mouth animation (higher = faster speech)
   
   // Custom visemes built from mouthOpen and mouthSmile combinations
