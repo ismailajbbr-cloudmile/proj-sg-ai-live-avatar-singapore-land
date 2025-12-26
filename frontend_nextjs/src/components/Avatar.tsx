@@ -64,7 +64,7 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
   // Idle mouth shape - set the default mouth position when not talking
   // You can use values from 0-1, or reference a viseme name from CUSTOM_VISEMES
   const IDLE_MOUTH_OPEN = 0; // Idle mouthOpen value (0 = closed, 1.0 = fully open)
-  const IDLE_MOUTH_SMILE = 0; // Idle mouthSmile value (0 = no smile, 1.0 = full smile)
+  const IDLE_MOUTH_SMILE = 0.2; // Idle mouthSmile value (0 = no smile, 1.0 = full smile)
   
   // Mouth animation settings - using morph targets (mouthOpen, mouthSmile)
   const MOUTH_INTENSITY = 1.5; // Mouth movement intensity (0 = no movement, 1.0 = full movement)
