@@ -13,21 +13,44 @@ useGLTF.preload("/avatar/avatar_1.glb");
 // ============================================================================
 
 // Camera settings - adjust these to change camera angle and position
-const CAMERA_X = 0; // left / right position
-const CAMERA_Y = 0.6; // Vertical position (higher = looks down more)
-const CAMERA_Z = 1; // Distance from avatar (lower = closer)
-const CAMERA_TARGET_Y = 0.45; // up / down position
-const CAMERA_TARGET_X = 0; // left / right position
-const CAMERA_TARGET_Z = 0; // forward / backward position
-const ENABLE_ZOOM = false;
-const ENABLE_PAN = false;
-const MIN_DISTANCE = 1;
-const MAX_DISTANCE = 5;
+// Camera position: Where the camera is located in 3D space
+const CAMERA_X = 0; // Camera horizontal position (left = negative, right = positive)
+const CAMERA_Y = 0; // Camera vertical position (the camera's height in 3D space)
+const CAMERA_Z = 0; // Camera distance from avatar (lower = closer/zoom in, higher = farther/zoom out)
 
-// Lighting settings - adjust these to change brightness
-const AMBIENT_LIGHT_INTENSITY = 1.0; // Overall base lighting (higher = brighter)
-const DIRECTIONAL_LIGHT_INTENSITY = 1.5; // Main light source (higher = brighter)
-const POINT_LIGHT_INTENSITY = 0.8; // Fill light (higher = brighter)
+// Camera target: Where the camera is looking at (the point the camera focuses on)
+// NOTE: The relationship between CAMERA_Y and CAMERA_TARGET_Y determines the camera angle:
+//   - If CAMERA_Y < CAMERA_TARGET_Y: camera looks upward
+//   - If CAMERA_Y > CAMERA_TARGET_Y: camera looks downward
+//   - If CAMERA_Y = CAMERA_TARGET_Y: camera looks straight ahead horizontally
+const CAMERA_TARGET_X = 0; // Target horizontal position (left = negative, right = positive)
+const CAMERA_TARGET_Y = 0; // Target vertical position (where the camera is pointing vertically)
+const CAMERA_TARGET_Z = -1.2; // Target depth position (negative = forward, positive = backward) // zoom
+
+// Avatar vertical position - adjust this to move avatar up/down
+const AVATAR_Y_POSITION = -1.5;
+
+// Camera field of view: Controls how wide/narrow the camera view is
+const CAMERA_FOV = 50; // Field of view in degrees (lower = more zoom/narrower view, higher = wider view)
+
+// Camera controls: Enable/disable user interactions with the camera
+const ENABLE_ZOOM = true; // Allow user to zoom in/out with mouse wheel or pinch
+const ENABLE_PAN = false; // Allow user to drag/move the camera horizontally/vertically
+const ENABLE_ROTATE = true; // Allow user to rotate the camera around the avatar
+
+// Camera distance limits: Constrain how close/far the camera can get (only applies if zoom is enabled)
+const MIN_DISTANCE = 2; // Minimum distance the camera can zoom in (closest)
+const MAX_DISTANCE = 6; // Maximum distance the camera can zoom out (farthest)
+
+// Lighting settings - adjust these to change brightness and shadows
+// Ambient light: Provides overall base lighting to all objects (no shadows, fills dark areas)
+const AMBIENT_LIGHT_INTENSITY = 2; // Overall base lighting (0 = dark, higher = brighter)
+
+// Directional light: Simulates sunlight (directional, creates shadows)
+const DIRECTIONAL_LIGHT_INTENSITY = 2; // Main light source intensity (0 = off, higher = brighter)
+
+// Point light: Simulates a light bulb (radiates in all directions from a point)
+const POINT_LIGHT_INTENSITY = 2; // Fill light intensity (0 = off, higher = brighter)
 
 
 interface AvatarModelProps {
@@ -35,8 +58,6 @@ interface AvatarModelProps {
 }
 
 function AvatarModel({ isTalking }: AvatarModelProps) {
-  // Avatar vertical position - adjust this to move avatar up/down
-  const AVATAR_Y_POSITION = -1.0;
 
   // Left arm/hand rotation settings - adjust these to position hands
   const LEFT_FOREARM_ROTATION_X = -1.5; // Rotate down (negative = down)
@@ -57,7 +78,7 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
   const RIGHT_HAND_ROTATION_Z = -LEFT_HAND_ROTATION_Z; // Mirrored (negated)
 
   // Neck rotation settings - adjust these to set default neck position
-  const NECK_ROTATION_X = 0.2; // Up/down rotation (positive = tilt up, negative = tilt down)
+  const NECK_ROTATION_X = 0.3; // Up/down rotation (positive = tilt up, negative = tilt down)
   const NECK_ROTATION_Y = 0; // Side to side rotation (positive = turn right, negative = turn left)
   const NECK_ROTATION_Z = 0; // Tilt rotation (positive = tilt right, negative = tilt left)
 
@@ -435,7 +456,7 @@ interface AvatarProps {
 export default function Avatar({ isTalking = false }: AvatarProps) {
   return (
     <div className="h-full w-full bg-gradient-to-br from-zinc-100 to-zinc-200 dark:from-zinc-900 dark:to-zinc-800">
-      <Canvas camera={{ position: [CAMERA_X, CAMERA_Y, CAMERA_Z], fov: 50 }}>
+      <Canvas camera={{ position: [CAMERA_X, CAMERA_Y, CAMERA_Z], fov: CAMERA_FOV }}>
         <ambientLight intensity={AMBIENT_LIGHT_INTENSITY} />
         <directionalLight position={[10, 10, 5]} intensity={DIRECTIONAL_LIGHT_INTENSITY} />
         <pointLight position={[-10, -10, -5]} intensity={POINT_LIGHT_INTENSITY} />
@@ -445,6 +466,7 @@ export default function Avatar({ isTalking = false }: AvatarProps) {
         <OrbitControls
           enableZoom={ENABLE_ZOOM}
           enablePan={ENABLE_PAN}
+          enableRotate={ENABLE_ROTATE}
           minDistance={MIN_DISTANCE}
           maxDistance={MAX_DISTANCE}
           target={[CAMERA_TARGET_X, CAMERA_TARGET_Y, CAMERA_TARGET_Z]}
