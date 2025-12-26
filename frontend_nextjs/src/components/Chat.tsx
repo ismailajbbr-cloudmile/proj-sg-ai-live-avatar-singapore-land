@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 interface Message {
   id: number;
@@ -18,9 +18,19 @@ function formatTime(date: Date): string {
 
 interface ChatProps {
   onBotMessage?: () => void;
+  language?: string | string[]; // Language code(s) for speech recognition
+  // Examples: "en-US", "zh-CN", ["en-US", "zh-CN"], "en-US,zh-CN"
 }
 
-export default function Chat({ onBotMessage }: ChatProps) {
+// Speech Recognition types
+declare global {
+  interface Window {
+    webkitSpeechRecognition: any;
+    SpeechRecognition: any;
+  }
+}
+
+export default function Chat({ onBotMessage, language = "en-US" }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -30,25 +40,34 @@ export default function Chat({ onBotMessage }: ChatProps) {
     },
   ]);
   const [input, setInput] = useState("");
+  const [isRecording, setIsRecording] = useState(false);
+  const [isSupported, setIsSupported] = useState(false);
+  const recognitionRef = useRef<any>(null);
+  const isPressingRef = useRef(false);
+  const isRecordingRef = useRef(false);
+  const messageIdRef = useRef(2);
 
-  const handleSend = () => {
-    if (!input.trim()) return;
+  const handleSend = (textToSend?: string) => {
+    const text = textToSend || input;
+    if (!text.trim()) return;
 
     const newMessage: Message = {
-      id: messages.length + 1,
-      text: input,
+      id: messageIdRef.current++,
+      text: text,
       sender: "user",
       timestamp: new Date(),
     };
 
-    setMessages([...messages, newMessage]);
-    setInput("");
+    setMessages((prev) => [...prev, newMessage]);
+    if (!textToSend) {
+      setInput("");
+    }
 
     // Simulate bot response
     setTimeout(() => {
       const botResponse: Message = {
-        id: messages.length + 2,
-        text: "I received your message: " + input,
+        id: messageIdRef.current++,
+        text: "I received your message: " + text,
         sender: "bot",
         timestamp: new Date(),
       };
@@ -66,6 +85,118 @@ export default function Chat({ onBotMessage }: ChatProps) {
       handleSend();
     }
   };
+
+  // Initialize speech recognition
+  useEffect(() => {
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    
+    if (SpeechRecognition) {
+      setIsSupported(true);
+      
+      // Normalize language prop to comma-separated string
+      let languageString: string;
+      if (!language) {
+        languageString = "en-US";
+      } else if (Array.isArray(language)) {
+        languageString = language.join(",");
+      } else {
+        languageString = language;
+      }
+      
+      const recognition = new SpeechRecognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = languageString;
+
+      recognition.onresult = (event: any) => {
+        const transcript = event.results[0][0].transcript;
+        if (transcript.trim()) {
+          // Send the transcript directly
+          handleSend(transcript);
+        }
+      };
+
+      recognition.onerror = (event: any) => {
+        console.error("Speech recognition error:", event.error);
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      };
+
+      recognition.onend = () => {
+        isRecordingRef.current = false;
+        setIsRecording(false);
+      };
+
+      recognitionRef.current = recognition;
+    }
+
+    return () => {
+      if (recognitionRef.current) {
+        recognitionRef.current.stop();
+      }
+    };
+  }, [language]);
+
+  const startRecording = useCallback(() => {
+    if (recognitionRef.current && !isRecordingRef.current) {
+      try {
+        recognitionRef.current.start();
+        isRecordingRef.current = true;
+        setIsRecording(true);
+      } catch (error) {
+        console.error("Failed to start recording:", error);
+      }
+    }
+  }, []);
+
+  const stopRecording = useCallback(() => {
+    if (recognitionRef.current && isRecordingRef.current) {
+      try {
+        recognitionRef.current.stop();
+      } catch (error) {
+        console.error("Failed to stop recording:", error);
+      }
+    }
+  }, []);
+
+  const handlePushToTalkStart = () => {
+    if (!isPressingRef.current) {
+      isPressingRef.current = true;
+      startRecording();
+    }
+  };
+
+  const handlePushToTalkEnd = () => {
+    if (isPressingRef.current) {
+      isPressingRef.current = false;
+      stopRecording();
+    }
+  };
+
+  // Handle keyboard shortcut (Space bar for push-to-talk)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.code === "Space" && e.target === document.body) {
+        e.preventDefault();
+        handlePushToTalkStart();
+      }
+    };
+
+    const handleKeyUp = (e: KeyboardEvent) => {
+      if (e.code === "Space") {
+        e.preventDefault();
+        handlePushToTalkEnd();
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
   return (
     <div className="flex h-full flex-col bg-white dark:bg-zinc-900">
@@ -120,13 +251,69 @@ export default function Chat({ onBotMessage }: ChatProps) {
             placeholder="Type your message..."
             className="flex-1 rounded-lg border border-zinc-300 bg-white px-4 py-2 text-zinc-900 placeholder-zinc-400 focus:border-zinc-500 focus:outline-none focus:ring-2 focus:ring-zinc-500 dark:border-zinc-700 dark:bg-zinc-800 dark:text-zinc-50 dark:placeholder-zinc-500 dark:focus:border-zinc-600 dark:focus:ring-zinc-600"
           />
+          {isSupported && (
+            <button
+              onMouseDown={handlePushToTalkStart}
+              onMouseUp={handlePushToTalkEnd}
+              onMouseLeave={handlePushToTalkEnd}
+              onTouchStart={(e) => {
+                e.preventDefault();
+                handlePushToTalkStart();
+              }}
+              onTouchEnd={(e) => {
+                e.preventDefault();
+                handlePushToTalkEnd();
+              }}
+              className={`relative flex items-center justify-center rounded-lg px-6 py-2 font-medium text-white transition-all ${
+                isRecording
+                  ? "bg-red-600 hover:bg-red-700 dark:bg-red-600 dark:hover:bg-red-700 animate-pulse"
+                  : "bg-blue-600 hover:bg-blue-700 dark:bg-blue-600 dark:hover:bg-blue-700"
+              }`}
+              title="Hold to talk (or press Space)"
+            >
+              {isRecording ? (
+                <>
+                  <span className="mr-2 h-2 w-2 rounded-full bg-white"></span>
+                  Recording...
+                </>
+              ) : (
+                <>
+                  <svg
+                    className="mr-2 h-5 w-5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"
+                    />
+                  </svg>
+                  Push to Talk
+                </>
+              )}
+            </button>
+          )}
           <button
-            onClick={handleSend}
-            className="rounded-lg bg-zinc-900 px-6 py-2 font-medium text-white transition-colors hover:bg-zinc-800 dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
+            onClick={() => handleSend()}
+            disabled={!input.trim()}
+            className="rounded-lg bg-zinc-900 px-6 py-2 font-medium text-white transition-colors hover:bg-zinc-800 disabled:opacity-50 disabled:cursor-not-allowed dark:bg-zinc-50 dark:text-zinc-900 dark:hover:bg-zinc-200"
           >
             Send
           </button>
         </div>
+        {isSupported && (
+          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            💡 Hold the button or press Space to record your message
+          </p>
+        )}
+        {!isSupported && (
+          <p className="mt-2 text-xs text-zinc-500 dark:text-zinc-400">
+            ⚠️ Speech recognition is not supported in your browser
+          </p>
+        )}
       </div>
     </div>
   );
