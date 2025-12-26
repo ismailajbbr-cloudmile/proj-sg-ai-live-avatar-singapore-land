@@ -86,12 +86,12 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
   ];
 
   // Head movement during talking - adjust these to control head movement intensity
-  const TALKING_HEAD_NOD_AMPLITUDE = 0.08; // Up/down nod amount (reduced from 0.2)
-  const TALKING_HEAD_SHAKE_AMPLITUDE = 0.06; // Side to side shake amount (reduced from 0.15)
-  const TALKING_HEAD_TILT_AMPLITUDE = 0.04; // Tilt amount (reduced from 0.1)
-  const TALKING_HEAD_NOD_SPEED = 3; // Speed of nodding
+  const TALKING_HEAD_NOD_AMPLITUDE = 0.04; // Up/down nod amount (reduced for less movement)
+  const TALKING_HEAD_SHAKE_AMPLITUDE = 0.04; // Side to side shake amount (reduced for less movement)
+  const TALKING_HEAD_TILT_AMPLITUDE = 0.03; // Tilt amount (reduced for less movement)
+  const TALKING_HEAD_NOD_SPEED = 2.5; // Speed of nodding
   const TALKING_HEAD_SHAKE_SPEED = 2.5; // Speed of shaking
-  const TALKING_HEAD_TILT_SPEED = 2; // Speed of tilting
+  const TALKING_HEAD_TILT_SPEED = 2.5; // Speed of tilting
 
   // Blink animation settings - adjust these to control blinking
   const BLINK_INTERVAL = 10; // Seconds between blinks (lower = blink more often)
