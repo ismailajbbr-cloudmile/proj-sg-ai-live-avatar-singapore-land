@@ -6,7 +6,7 @@ import { Suspense, useRef, useEffect } from "react";
 import { Group } from "three";
 
 // Preload the model for better performance
-useGLTF.preload("/avatar/694df247452afe2bbfdfe7dc.glb");
+useGLTF.preload("/avatar/avatar_1.glb");
 
 // ============================================================================
 // CONFIGURATION CONSTANTS - Adjust these to customize avatar appearance
@@ -97,7 +97,7 @@ function AvatarModel({ isTalking }: AvatarModelProps) {
   const BLINK_INTERVAL = 10; // Seconds between blinks (lower = blink more often)
   const BLINK_DURATION = 0.2; // Duration of each blink in seconds (lower = faster blink)
 
-  const { scene, nodes } = useGLTF("/avatar/694df247452afe2bbfdfe7dc.glb");
+  const { scene, nodes } = useGLTF("/avatar/avatar_1.glb");
   const groupRef = useRef<Group>(null);
   const headRef = useRef<any>(null);
   const neckRef = useRef<any>(null);
