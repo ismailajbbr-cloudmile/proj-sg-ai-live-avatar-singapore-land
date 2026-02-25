@@ -337,7 +337,7 @@ export default function Chat({
 
         {/* Footer info text */}
         <p className="mt-3 text-center text-[10px] font-medium text-gray-400">
-          Powered by Avatar AI &bull; Your privacy is protected
+          Powered by CloudMile &bull; Your privacy is protected
         </p>
       </div>
     </div>

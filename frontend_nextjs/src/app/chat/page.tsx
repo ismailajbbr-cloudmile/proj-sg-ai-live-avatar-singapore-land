@@ -12,27 +12,7 @@ import Chat from "@/components/Chat";
 const AVATAR_NAME = "Singapore Land AI Concierge";
 const TALKING_DURATION_MS = 3000;
 
-function SingaporeLandLogo() {
-  return (
-    <div className="flex items-center gap-2">
-      {/* Abstract logo mark approximation */}
-      <div className="flex items-end h-[24px] gap-0.5">
-        <div className="w-[8px] h-[16px] bg-[#0a2240]" style={{ clipPath: "polygon(0 30%, 100% 0, 100% 100%, 0 100%)" }} />
-        <div className="w-[8px] h-[24px] bg-[#0a2240]" style={{ clipPath: "polygon(0 15%, 100% 0, 100% 100%, 0 100%)" }} />
-        <div className="w-[8px] h-[14px] bg-[#c89b3c]" style={{ clipPath: "polygon(0 0, 100% 30%, 100% 100%, 0 100%)" }} />
-      </div>
-      {/* Logotype */}
-      <div className="flex flex-col">
-        <span
-          className="text-[#0a2240] font-bold text-lg tracking-[0.1em] leading-none"
-          style={{ fontFamily: "'Inter', sans-serif" }}
-        >
-          SINGAPORELAND
-        </span>
-      </div>
-    </div>
-  );
-}
+
 
 function CallTimer() {
   const [seconds, setSeconds] = useState(0);
@@ -71,8 +51,8 @@ function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: Tool
     >
       <div
         className={`flex items-center justify-center gap-0.5 rounded-full shadow-md transition-all ${danger
-            ? "hover:bg-red-600 active:bg-red-700"
-            : "hover:scale-105 active:scale-95"
+          ? "hover:bg-red-600 active:bg-red-700"
+          : "hover:scale-105 active:scale-95"
           }`}
         style={{
           width: 52,
@@ -107,16 +87,12 @@ export default function ChatPage() {
   const [isTalking, setIsTalking] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
-  const [isCamOn, setIsCamOn] = useState(true);
+  const [isCamOn, setIsCamOn] = useState(false);
   const [lang, setLang] = useState("en-US");
 
   useEffect(() => {
     const stored = sessionStorage.getItem("selectedLang");
     if (stored) setLang(stored);
-
-    // Auto-open chat slightly delayed for effect
-    const t = setTimeout(() => setIsChatOpen(true), 1000);
-    return () => clearTimeout(t);
   }, []);
 
   const handleBotMessage = () => {
@@ -145,23 +121,10 @@ export default function ChatPage() {
 
           {/* Logo Pill */}
           <div className="flex items-center gap-3 bg-white/90 backdrop-blur-md pl-4 pr-5 py-2.5 rounded-full shadow-md border border-white/50">
-            <SingaporeLandLogo />
+            <img src="/logo.png" alt="Singapore Land Group" className="h-8 object-contain" />
             <div className="w-px h-5 bg-gray-200 ml-1"></div>
             <span className="text-sm font-semibold text-[#64748b]">AI Concierge</span>
           </div>
-
-          <button
-            onClick={handleHangUp}
-            className="flex items-center justify-center rounded-full bg-white/90 backdrop-blur-md shadow-md border border-white/50 hover:bg-white text-[#0a2240] transition-all"
-            style={{ width: 44, height: 44 }}
-            title="Exit"
-          >
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-              <polyline points="16 17 21 12 16 7" />
-              <line x1="21" y1="12" x2="9" y2="12" />
-            </svg>
-          </button>
         </div>
 
         {/* ── Bottom Toolbar Center ── */}
@@ -231,7 +194,7 @@ export default function ChatPage() {
 
       {/* ── Right Side: Chat Panel Container (Push Animated) ── */}
       <div
-        className="h-full bg-white transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-2xl z-30"
+        className="h-full bg-white transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-2xl z-30 overflow-hidden"
         style={{
           width: isChatOpen ? 380 : 0,
           minWidth: isChatOpen ? 380 : 0,

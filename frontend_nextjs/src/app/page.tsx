@@ -76,7 +76,7 @@ export default function LobbyPage() {
 
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 right-0 h-20 bg-white shadow-sm flex items-center justify-between px-8 z-10 w-full">
-        <SingaporeLandLogo />
+        <img src="/logo.png" alt="Singapore Land Group" className="h-12 object-contain" />
         <div className="text-[#0a2240] font-medium tracking-wide">
           AI Concierge Kiosk
         </div>
