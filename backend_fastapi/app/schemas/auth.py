@@ -4,7 +4,7 @@ class LoginRequest(BaseModel):
     email: EmailStr = Field(..., description="User's email address")
     password: SecretStr = Field(..., description="User's password")
 
-class LoginResponse(BaseModel):
+class TokenResponse(BaseModel):
     access_token: str = Field(..., description="Access token")
     refresh_token: str = Field(..., description="Refresh token")
 

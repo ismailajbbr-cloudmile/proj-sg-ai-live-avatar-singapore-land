@@ -56,7 +56,7 @@ class ChatSession(SQLModel, table=True):
 
     id: UUID = Field(default_factory=uuid4, primary_key=True, index=True)
     title: str
-    session_type: SessionType = Field(default=SessionType.EXPLORE)
+    session_type: SessionType = Field(default=SessionType.CHAT)
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
