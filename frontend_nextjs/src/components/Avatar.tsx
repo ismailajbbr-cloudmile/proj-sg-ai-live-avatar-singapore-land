@@ -455,7 +455,7 @@ interface AvatarProps {
 
 export default function Avatar({ isTalking = false }: AvatarProps) {
   return (
-    <div className="h-full w-full bg-black">
+    <div className="h-full w-full bg-[#f8f9fa]">
       <Canvas camera={{ position: [CAMERA_X, CAMERA_Y, CAMERA_Z], fov: CAMERA_FOV }}>
         <ambientLight intensity={AMBIENT_LIGHT_INTENSITY} />
         <directionalLight position={[10, 10, 5]} intensity={DIRECTIONAL_LIGHT_INTENSITY} />

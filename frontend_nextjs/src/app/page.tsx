@@ -5,14 +5,36 @@ import { useRouter } from "next/navigation";
 
 // Page Name: Lobby
 // Route: /
-// Description: Pre-call lobby screen — shows avatar preview and Start video chat button
+// Description: Pre-call lobby screen — Singapore Land corporate theme
 
-const AVATAR_NAME = "Sofia";
+const AVATAR_NAME = "Singapore Land AI Concierge";
 
 const LANGUAGE_OPTIONS = [
   { code: "en-US", label: "English", flag: "🇺🇸" },
   { code: "zh-CN", label: "中文 (简体)", flag: "🇨🇳" },
 ];
+
+function SingaporeLandLogo() {
+  return (
+    <div className="flex items-center gap-3">
+      {/* Abstract logo mark approximation */}
+      <div className="flex items-end h-[40px] gap-0.5">
+        <div className="w-[12px] h-[24px] bg-[#0a2240]" style={{ clipPath: "polygon(0 30%, 100% 0, 100% 100%, 0 100%)" }} />
+        <div className="w-[12px] h-[36px] bg-[#0a2240]" style={{ clipPath: "polygon(0 15%, 100% 0, 100% 100%, 0 100%)" }} />
+        <div className="w-[12px] h-[20px] bg-[#c89b3c]" style={{ clipPath: "polygon(0 0, 100% 30%, 100% 100%, 0 100%)" }} />
+      </div>
+      {/* Logotype */}
+      <div className="flex flex-col">
+        <span
+          className="text-[#0a2240] font-bold text-2xl tracking-[0.15em] leading-none"
+          style={{ fontFamily: "'Inter', sans-serif" }}
+        >
+          SINGAPORELAND
+        </span>
+      </div>
+    </div>
+  );
+}
 
 export default function LobbyPage() {
   const router = useRouter();
@@ -39,164 +61,144 @@ export default function LobbyPage() {
         video: true,
       });
       streamRef.current = stream;
-      // Store selected language in sessionStorage so /chat can read it
       sessionStorage.setItem("selectedLang", LANGUAGE_OPTIONS[langIndex].code);
       router.push("/chat");
     } catch (err: any) {
-      // Permission denied or not supported — still allow entry, just note it
       console.warn("Media permission error:", err.message);
-      setPermError(
-        "Mic/camera access denied. You can still chat using text."
-      );
+      setPermError("Camera/Mic access denied. Continuing with text only...");
       sessionStorage.setItem("selectedLang", LANGUAGE_OPTIONS[langIndex].code);
       setTimeout(() => router.push("/chat"), 1800);
     }
   };
 
   return (
-    <div
-      className="relative flex h-screen w-full flex-col items-center justify-center overflow-hidden"
-      style={{ background: "#0f0f0f" }}
-    >
-      {/* Avatar preview card */}
-      <div className="relative mx-auto w-full max-w-3xl flex-1 flex items-center justify-center px-4">
-        <div
-          className="relative w-full overflow-hidden"
-          style={{
-            borderRadius: "12px",
-            maxHeight: "68vh",
-            aspectRatio: "16/9",
-            background: "#1a1a1a",
-          }}
-        >
-          {/* Avatar image placeholder — replace with actual 3D canvas if desired */}
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-[#2a2835] to-[#1a1825]">
-            <div className="text-center">
-              <div
-                className="mx-auto mb-4 flex items-center justify-center rounded-full bg-white/10 text-white"
-                style={{ width: 100, height: 100, fontSize: 52 }}
-              >
-                👤
-              </div>
-              <p className="text-lg font-semibold text-white">{AVATAR_NAME}</p>
-              <p className="text-sm text-white/50">AI Avatar</p>
-            </div>
-          </div>
+    <div className="relative flex h-screen w-full justify-center overflow-hidden bg-[#f8f9fa]">
 
-          {/* Powered by watermark */}
-          <div className="absolute bottom-3 right-4">
-            <span className="text-xs font-medium text-white/40">
-              Powered by Avatar AI
-            </span>
-          </div>
+      {/* Top Navigation Bar */}
+      <div className="absolute top-0 left-0 right-0 h-20 bg-white shadow-sm flex items-center justify-between px-8 z-10 w-full">
+        <SingaporeLandLogo />
+        <div className="text-[#0a2240] font-medium tracking-wide">
+          AI Concierge Kiosk
         </div>
       </div>
 
-      {/* Error hint */}
-      {permError && (
-        <p className="mb-2 text-xs text-amber-400 px-4 text-center">
-          ⚠️ {permError}
-        </p>
-      )}
+      {/* Main Content Area */}
+      <div className="relative w-full max-w-5xl flex flex-col items-center justify-center pt-24 pb-8 px-4 h-full">
 
-      {/* Bottom bar */}
-      <div className="flex items-center gap-3 pb-8 pt-4">
-        {/* Avatars button */}
-        <div className="relative">
-          <button
-            onClick={() => {
-              setShowAvatarsMenu((p) => !p);
-              setShowLangMenu(false);
-            }}
-            className="flex items-center gap-2 rounded-full px-5 py-2.5 text-sm font-medium text-white transition"
-            style={{ background: "#2a2a2a" }}
-          >
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="9" cy="7" r="4"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/>
-              <path d="M16 3.13a4 4 0 0 1 0 7.75"/><path d="M21 21v-2a4 4 0 0 0-3-3.85"/>
-            </svg>
-            Avatars
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </button>
-          {showAvatarsMenu && (
-            <div
-              className="absolute bottom-full mb-2 left-0 rounded-xl p-2 shadow-xl w-44"
-              style={{ background: "#1e1e1e", border: "1px solid #333" }}
-            >
-              {["Sofia", "Alex", "Maya"].map((name) => (
-                <button
-                  key={name}
-                  className="w-full rounded-lg px-3 py-2 text-left text-sm text-white hover:bg-white/10 transition"
-                >
-                  {name}
-                </button>
-              ))}
+        {/* Avatar preview card */}
+        <div className="relative w-full overflow-hidden rounded-2xl shadow-2xl shadow-black/5 bg-white border border-gray-100 flex-1 max-h-[70vh] flex flex-col">
+          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-[#f0f4f8] to-white">
+            <div className="text-center">
+              <div
+                className="mx-auto mb-6 flex items-center justify-center rounded-full bg-[#0a2240] text-white shadow-lg"
+                style={{ width: 120, height: 120, fontSize: 60 }}
+              >
+                👤
+              </div>
+              <h1 className="text-3xl font-bold text-[#0a2240] mb-2">{AVATAR_NAME}</h1>
+              <p className="text-[#64748b] text-lg">Tap to start a conversation</p>
             </div>
-          )}
+          </div>
         </div>
 
-        {/* Language selector */}
-        <div className="relative">
-          <button
-            onClick={() => {
-              setShowLangMenu((p) => !p);
-              setShowAvatarsMenu(false);
-            }}
-            className="flex items-center gap-2 rounded-full px-4 py-2.5 text-sm font-medium text-white transition"
-            style={{ background: "#2a2a2a" }}
-          >
-            <span className="text-lg">{LANGUAGE_OPTIONS[langIndex].flag}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <path d="M6 9l6 6 6-6"/>
-            </svg>
-          </button>
-          {showLangMenu && (
-            <div
-              className="absolute bottom-full mb-2 left-0 rounded-xl p-2 shadow-xl w-48"
-              style={{ background: "#1e1e1e", border: "1px solid #333" }}
-            >
-              {LANGUAGE_OPTIONS.map((lang, i) => (
-                <button
-                  key={lang.code}
-                  onClick={() => {
-                    setLangIndex(i);
-                    setShowLangMenu(false);
-                  }}
-                  className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-sm text-white hover:bg-white/10 transition"
-                >
-                  <span className="text-base">{lang.flag}</span>
-                  {lang.label}
-                  {i === langIndex && (
-                    <svg className="ml-auto" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#4ade80" strokeWidth="2.5">
-                      <path d="M20 6L9 17l-5-5"/>
-                    </svg>
-                  )}
-                </button>
-              ))}
-            </div>
-          )}
-        </div>
+        {/* Error hint */}
+        {permError && (
+          <p className="mt-4 text-sm font-medium text-amber-600 bg-amber-50 px-4 py-2 rounded-lg">
+            ⚠️ {permError}
+          </p>
+        )}
 
-        {/* Start video chat button */}
-        <button
-          onClick={handleStartChat}
-          disabled={isStarting}
-          className="flex items-center gap-2 rounded-full px-6 py-2.5 text-sm font-semibold text-white shadow-lg transition disabled:opacity-70"
-          style={{ background: isStarting ? "#16a34a" : "#22c55e", color: "#fff" }}
-        >
-          {isStarting ? (
-            <svg className="animate-spin" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 1 1-6.219-8.56"/>
-            </svg>
-          ) : (
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
-              <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.32.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.26.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z"/>
-            </svg>
-          )}
-          {isStarting ? "Starting…" : "Start video chat"}
-        </button>
+        {/* Bottom controls */}
+        <div className="mt-8 mb-4 flex items-center gap-4 bg-white p-3 rounded-full shadow-lg border border-gray-100">
+
+          {/* Avatars button */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowAvatarsMenu((p) => !p);
+                setShowLangMenu(false);
+              }}
+              className="flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-[#0a2240] hover:bg-gray-50 transition"
+            >
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <circle cx="9" cy="7" r="4" /><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
+                <path d="M16 3.13a4 4 0 0 1 0 7.75" /><path d="M21 21v-2a4 4 0 0 0-3-3.85" />
+              </svg>
+              Select Concierge
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {showAvatarsMenu && (
+              <div className="absolute bottom-full mb-3 left-0 rounded-xl p-2 shadow-xl shadow-black/10 w-48 bg-white border border-gray-100 z-50">
+                {["Sofia", "David", "Elena"].map((name) => (
+                  <button key={name} className="w-full rounded-lg px-4 py-3 text-left font-medium text-[#0a2240] hover:bg-gray-50 transition">
+                    {name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          <div className="w-px h-8 bg-gray-200"></div>
+
+          {/* Language selector */}
+          <div className="relative">
+            <button
+              onClick={() => {
+                setShowLangMenu((p) => !p);
+                setShowAvatarsMenu(false);
+              }}
+              className="flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-[#0a2240] hover:bg-gray-50 transition"
+            >
+              <span className="text-xl">{LANGUAGE_OPTIONS[langIndex].flag}</span>
+              {LANGUAGE_OPTIONS[langIndex].code.split('-')[0].toUpperCase()}
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M6 9l6 6 6-6" />
+              </svg>
+            </button>
+            {showLangMenu && (
+              <div className="absolute bottom-full mb-3 left-0 rounded-xl p-2 shadow-xl shadow-black/10 w-56 bg-white border border-gray-100 z-50">
+                {LANGUAGE_OPTIONS.map((lang, i) => (
+                  <button
+                    key={lang.code}
+                    onClick={() => { setLangIndex(i); setShowLangMenu(false); }}
+                    className="flex w-full items-center gap-3 rounded-lg px-4 py-3 font-medium text-[#0a2240] hover:bg-gray-50 transition"
+                  >
+                    <span className="text-xl">{lang.flag}</span>
+                    {lang.label}
+                    {i === langIndex && (
+                      <svg className="ml-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c89b3c" strokeWidth="3">
+                        <path d="M20 6L9 17l-5-5" />
+                      </svg>
+                    )}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* Start video chat button */}
+          <button
+            onClick={handleStartChat}
+            disabled={isStarting}
+            className="flex items-center gap-3 rounded-full px-10 py-3.5 text-[15px] font-bold text-white shadow-xl shadow-[#c89b3c]/30 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-70 disabled:hover:scale-100"
+            style={{
+              background: isStarting ? "#b38a36" : "linear-gradient(135deg, #c89b3c 0%, #a67c2b 100%)",
+            }}
+          >
+            {isStarting ? (
+              <svg className="animate-spin" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="currentColor">
+                <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.32.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.26.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z" />
+              </svg>
+            )}
+            {isStarting ? "Connecting..." : "Tap to Start"}
+          </button>
+        </div>
       </div>
     </div>
   );
