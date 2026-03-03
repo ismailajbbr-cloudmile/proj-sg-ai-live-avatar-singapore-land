@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import type { VisemeFrame } from "@/types/viseme";
 
 interface Message {
   id: number;
@@ -10,7 +11,8 @@ interface Message {
 }
 
 interface ChatProps {
-  onBotMessage?: () => void;
+  /** Called whenever the bot has a new spoken response ready */
+  onBotSpeech?: (audioBase64: string, mimeType: string, visemes: VisemeFrame[]) => void;
   language?: string | string[];
   onClose?: () => void;
   avatarName?: string;
@@ -46,7 +48,6 @@ function getLanguageName(lang: string): string {
   return LANGUAGE_NAMES[lang] || lang;
 }
 
-// Small rounded icon for bot messages
 function BotAvatar() {
   return (
     <div
@@ -59,7 +60,7 @@ function BotAvatar() {
 }
 
 export default function Chat({
-  onBotMessage,
+  onBotSpeech,
   language = "en-US",
   onClose,
   avatarName = "AI Concierge",
@@ -75,16 +76,9 @@ export default function Chat({
   const [input, setInput] = useState("");
   const [isRecording, setIsRecording] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
-  const [ttsSupported, setTtsSupported] = useState(false);
-  const [ttsEnabled, setTtsEnabled] = useState(true);
-  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
-  const [selectedVoiceName, setSelectedVoiceName] = useState<string>("");
-  const [isVoiceManuallySelected, setIsVoiceManuallySelected] = useState(false);
+  const [isTtsBusy, setIsTtsBusy] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-
   const recognitionRef = useRef<any>(null);
-  const synthRef = useRef<SpeechSynthesis | null>(null);
-  const selectedVoiceNameRef = useRef<string>("");
   const isPressingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const messageIdRef = useRef(2);
@@ -97,72 +91,56 @@ export default function Chat({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
-  useEffect(() => {
-    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
-    synthRef.current = window.speechSynthesis;
-    setTtsSupported(true);
-    const loadVoices = () => setVoices(synthRef.current?.getVoices() || []);
-    loadVoices();
-    synthRef.current.addEventListener("voiceschanged", loadVoices);
-    return () => synthRef.current?.removeEventListener("voiceschanged", loadVoices);
-  }, []);
-
-  useEffect(() => {
-    if (voices.length === 0 || !currentLanguage) return;
-    const langPrefix = currentLanguage.split("-")[0];
-    setSelectedVoiceName((prev) => {
-      const currentVoiceMatches = voices.find((v) => v.name === prev)?.lang.startsWith(langPrefix);
-      if (!isVoiceManuallySelected || !currentVoiceMatches) {
-        const matchingVoice = voices.find((v) => v.lang.startsWith(langPrefix)) || voices[0];
-        if (matchingVoice) {
-          setIsVoiceManuallySelected(false);
-          selectedVoiceNameRef.current = matchingVoice.name;
-          return matchingVoice.name;
-        }
+  // ── TTS via Next.js API ───────────────────────────────────────────────────
+  const speakText = useCallback(async (text: string) => {
+    if (!onBotSpeech) return;
+    setIsTtsBusy(true);
+    try {
+      const res = await fetch("/api/tts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ text, language: currentLanguage }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.warn("[TTS] API error:", err.error ?? res.statusText);
+        return;
       }
-      return prev;
-    });
-  }, [currentLanguage, voices, isVoiceManuallySelected]);
-
-  useEffect(() => { selectedVoiceNameRef.current = selectedVoiceName; }, [selectedVoiceName]);
-
-  const speakText = useCallback((text: string) => {
-    if (!ttsEnabled || !synthRef.current) return;
-    synthRef.current.cancel();
-    const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = currentLanguage;
-    const availableVoices = synthRef.current.getVoices();
-    if (availableVoices.length > 0) {
-      const selectedName = selectedVoiceNameRef.current;
-      let voiceToUse = availableVoices.find((v) => v.name === selectedName);
-      if (!voiceToUse) {
-        const langPrefix = currentLanguage.split("-")[0];
-        voiceToUse = availableVoices.find((v) => v.lang.startsWith(langPrefix)) || availableVoices[0];
-      }
-      if (voiceToUse) utterance.voice = voiceToUse;
+      const { audioBase64, mimeType, visemes } = await res.json();
+      onBotSpeech(audioBase64, mimeType, visemes);
+    } catch (err) {
+      console.error("[TTS] fetch failed:", err);
+    } finally {
+      setIsTtsBusy(false);
     }
-    synthRef.current.speak(utterance);
-  }, [ttsEnabled, currentLanguage]);
+  }, [onBotSpeech, currentLanguage]);
 
-  useEffect(() => () => synthRef.current?.cancel(), []);
-  useEffect(() => { if (!ttsEnabled) synthRef.current?.cancel(); }, [ttsEnabled]);
-
+  // ── Chat logic ────────────────────────────────────────────────────────────
   const handleSend = (textToSend?: string) => {
     const text = textToSend || input;
     if (!text.trim()) return;
-    setMessages((prev) => [...prev, { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() }]);
+    setMessages((prev) => [
+      ...prev,
+      { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() },
+    ]);
     if (!textToSend) setInput("");
 
     setTimeout(() => {
-      const botResponse: Message = { id: messageIdRef.current++, text: "I received your message: " + text, sender: "bot", timestamp: new Date() };
+      const botResponse: Message = {
+        id: messageIdRef.current++,
+        text: "I received your message: " + text,
+        sender: "bot",
+        timestamp: new Date(),
+      };
       setMessages((prev) => [...prev, botResponse]);
-      onBotMessage?.();
       speakText(botResponse.text);
     }, 500);
   };
 
+  // ── Speech recognition ────────────────────────────────────────────────────
   useEffect(() => {
-    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    const SpeechRecognition =
+      window.SpeechRecognition || window.webkitSpeechRecognition;
     if (!SpeechRecognition) return;
     setIsSupported(true);
     const recognition = new SpeechRecognition();
@@ -173,32 +151,58 @@ export default function Chat({
       const t = e.results[0][0].transcript;
       if (t.trim()) handleSend(t);
     };
-    recognition.onerror = recognition.onend = () => { isRecordingRef.current = false; setIsRecording(false); };
+    recognition.onerror = recognition.onend = () => {
+      isRecordingRef.current = false;
+      setIsRecording(false);
+    };
     recognitionRef.current = recognition;
     return () => recognitionRef.current?.stop();
   }, [currentLanguage]);
 
   const startRecord = useCallback(() => {
     if (recognitionRef.current && !isRecordingRef.current) {
-      try { recognitionRef.current.start(); isRecordingRef.current = true; setIsRecording(true); } catch { }
+      try {
+        recognitionRef.current.start();
+        isRecordingRef.current = true;
+        setIsRecording(true);
+      } catch { }
     }
   }, []);
+
   const stopRecord = useCallback(() => {
-    if (recognitionRef.current && isRecordingRef.current) { try { recognitionRef.current.stop(); } catch { } }
+    if (recognitionRef.current && isRecordingRef.current) {
+      try { recognitionRef.current.stop(); } catch { }
+    }
   }, []);
 
-  const handlePushToTalkStart = () => { if (!isPressingRef.current) { isPressingRef.current = true; startRecord(); } };
-  const handlePushToTalkEnd = () => { if (isPressingRef.current) { isPressingRef.current = false; stopRecord(); } };
+  const handlePushToTalkStart = () => {
+    if (!isPressingRef.current) { isPressingRef.current = true; startRecord(); }
+  };
+  const handlePushToTalkEnd = () => {
+    if (isPressingRef.current) { isPressingRef.current = false; stopRecord(); }
+  };
 
   useEffect(() => {
-    const down = (e: KeyboardEvent) => { if (e.code === "Space" && e.target === document.body) { e.preventDefault(); handlePushToTalkStart(); } };
-    const up = (e: KeyboardEvent) => { if (e.code === "Space") { e.preventDefault(); handlePushToTalkEnd(); } };
-    window.addEventListener("keydown", down); window.addEventListener("keyup", up);
-    return () => { window.removeEventListener("keydown", down); window.removeEventListener("keyup", up); };
+    const down = (e: KeyboardEvent) => {
+      if (e.code === "Space" && e.target === document.body) {
+        e.preventDefault(); handlePushToTalkStart();
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.code === "Space") { e.preventDefault(); handlePushToTalkEnd(); }
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
   }, []);
 
   const toggleLanguage = () => {
-    if (availableLanguages.length > 1) { setCurrentLanguageIndex((p) => (p + 1) % availableLanguages.length); setIsVoiceManuallySelected(false); }
+    if (availableLanguages.length > 1) {
+      setCurrentLanguageIndex((p) => (p + 1) % availableLanguages.length);
+    }
   };
 
   return (
@@ -207,19 +211,8 @@ export default function Chat({
       <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shadow-sm z-10">
         <span className="text-base font-bold text-[#0a2240]">Conversation</span>
         <div className="flex items-center gap-3">
-          {ttsSupported && (
-            <button
-              onClick={() => setTtsEnabled((p) => !p)}
-              className="rounded-lg p-1.5 transition-colors hover:bg-gray-100"
-              style={{ color: ttsEnabled ? "#0a2240" : "#94a3b8" }}
-              title={ttsEnabled ? "TTS On" : "TTS Off"}
-            >
-              {ttsEnabled ? (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><path d="M19.07 4.93a10 10 0 0 1 0 14.14M15.54 8.46a5 5 0 0 1 0 7.07" /></svg>
-              ) : (
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" /><line x1="23" y1="9" x2="17" y2="15" /><line x1="17" y1="9" x2="23" y2="15" /></svg>
-              )}
-            </button>
+          {isTtsBusy && (
+            <span className="text-xs text-gray-400 animate-pulse">Speaking…</span>
           )}
           {onClose && (
             <button
@@ -279,8 +272,6 @@ export default function Chat({
       {/* ── Input Area ── */}
       <div className="p-4 bg-white border-t border-gray-100">
         <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-2 py-1.5 focus-within:border-[#0a2240] focus-within:ring-1 focus-within:ring-[#0a2240] transition-all">
-
-          {/* Push to talk */}
           {isSupported && (
             <button
               onMouseDown={handlePushToTalkStart}
@@ -288,7 +279,9 @@ export default function Chat({
               onMouseLeave={handlePushToTalkEnd}
               onTouchStart={(e) => { e.preventDefault(); handlePushToTalkStart(); }}
               onTouchEnd={(e) => { e.preventDefault(); handlePushToTalkEnd(); }}
-              className={`flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${isRecording ? "bg-red-500 text-white animate-pulse shadow-md" : "bg-white text-gray-500 hover:text-[#0a2240] shadow-sm border border-gray-100"
+              className={`flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${isRecording
+                  ? "bg-red-500 text-white animate-pulse shadow-md"
+                  : "bg-white text-gray-500 hover:text-[#0a2240] shadow-sm border border-gray-100"
                 }`}
               style={{ width: 34, height: 34 }}
               title="Hold to talk (Space)"
@@ -312,7 +305,6 @@ export default function Chat({
             className="flex-1 bg-transparent px-2 text-[15px] text-[#0a2240] placeholder-gray-400 focus:outline-none"
           />
 
-          {/* Lang toggle */}
           {availableLanguages.length > 1 && (
             <button
               onClick={toggleLanguage}
@@ -322,7 +314,6 @@ export default function Chat({
             </button>
           )}
 
-          {/* Send */}
           <button
             onClick={() => handleSend()}
             disabled={!input.trim()}
@@ -335,7 +326,6 @@ export default function Chat({
           </button>
         </div>
 
-        {/* Footer info text */}
         <p className="mt-3 text-center text-[10px] font-medium text-gray-400">
           Powered by CloudMile &bull; Your privacy is protected
         </p>

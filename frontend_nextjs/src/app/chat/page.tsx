@@ -1,34 +1,28 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Chat from "@/components/Chat";
+import type { VisemeFrame } from "@/types/viseme";
 
 // Page Name: Chat (In-call)
 // Route: /chat
 // Description: Singapore Land AI Concierge Interface (Push Animation Layout)
 
 const AVATAR_NAME = "Singapore Land AI Concierge";
-const TALKING_DURATION_MS = 3000;
-
-
 
 function CallTimer() {
   const [seconds, setSeconds] = useState(0);
-
   useEffect(() => {
     const interval = setInterval(() => setSeconds((s) => s + 1), 1000);
     return () => clearInterval(interval);
   }, []);
-
   const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
   const ss = String(seconds % 60).padStart(2, "0");
   return (
     <div className="rounded-full bg-white/80 backdrop-blur-md border border-gray-200 px-3 py-1.5 shadow-sm">
-      <span className="text-sm font-semibold text-[#0a2240] tabular-nums">
-        {mm}:{ss}
-      </span>
+      <span className="text-sm font-semibold text-[#0a2240] tabular-nums">{mm}:{ss}</span>
     </div>
   );
 }
@@ -44,26 +38,15 @@ interface ToolbarBtnProps {
 
 function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: ToolbarBtnProps) {
   return (
-    <button
-      onClick={onClick}
-      title={label}
-      className="flex flex-col items-center gap-1.5 focus:outline-none group"
-    >
+    <button onClick={onClick} title={label} className="flex flex-col items-center gap-1.5 focus:outline-none group">
       <div
-        className={`flex items-center justify-center gap-0.5 rounded-full shadow-md transition-all ${danger
-          ? "hover:bg-red-600 active:bg-red-700"
-          : "hover:scale-105 active:scale-95"
+        className={`flex items-center justify-center gap-0.5 rounded-full shadow-md transition-all ${danger ? "hover:bg-red-600 active:bg-red-700" : "hover:scale-105 active:scale-95"
           }`}
         style={{
-          width: 52,
-          height: 52,
-          background: danger
-            ? "#ef4444"
-            : active
-              ? "#0a2240"
-              : "white",
+          width: 52, height: 52,
+          background: danger ? "#ef4444" : active ? "#0a2240" : "white",
           color: danger || active ? "white" : "#0a2240",
-          border: danger || active ? "none" : "1px solid #e2e8f0"
+          border: danger || active ? "none" : "1px solid #e2e8f0",
         }}
       >
         {children}
@@ -84,42 +67,138 @@ function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: Tool
 
 export default function ChatPage() {
   const router = useRouter();
-  const [isTalking, setIsTalking] = useState(false);
   const [isChatOpen, setIsChatOpen] = useState(false);
   const [isMicOn, setIsMicOn] = useState(true);
   const [isCamOn, setIsCamOn] = useState(false);
   const [lang, setLang] = useState("en-US");
+
+  // ── Lip sync state ────────────────────────────────────────────────────────
+  const [visemeFrames, setVisemeFrames] = useState<VisemeFrame[]>([]);
+  const [playheadMs, setPlayheadMs] = useState(0);
+
+  // Hidden audio element for cloud TTS playback
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const rafRef = useRef<number | null>(null);
+  const playTokenRef = useRef<number>(0);
+
+  useEffect(() => {
+    const el = document.createElement("audio");
+    el.preload = "auto";
+    el.style.display = "none";
+    document.body.appendChild(el);
+    audioRef.current = el;
+    return () => {
+      if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
+      el.pause();
+      el.remove();
+    };
+  }, []);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("selectedLang");
     if (stored) setLang(stored);
   }, []);
 
-  const handleBotMessage = () => {
-    setIsTalking(true);
-    setTimeout(() => setIsTalking(false), TALKING_DURATION_MS);
-  };
+  // ── RAF ticker ─────────────────────────────────────────────────────────────
+  const stopRaf = useCallback(() => {
+    if (rafRef.current != null) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
+  }, []);
 
-  const handleHangUp = () => {
-    router.push("/");
-  };
+  const startTick = useCallback((token: number) => {
+    const tick = () => {
+      if (playTokenRef.current !== token) return;
+      const a = audioRef.current;
+      if (!a) return;
+      setPlayheadMs(a.currentTime * 1000);
+      rafRef.current = requestAnimationFrame(tick);
+    };
+    stopRaf();
+    rafRef.current = requestAnimationFrame(tick);
+  }, [stopRaf]);
+
+  // ── Called by Chat.tsx when Google TTS delivers audio + visemes ────────────
+  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[]) => {
+    const token = playTokenRef.current + 1;
+    playTokenRef.current = token;
+
+    const el = audioRef.current;
+    if (!el) return;
+
+    try { el.pause(); } catch { }
+
+    // Decode base64 → Blob → Object URL
+    const bytes = atob(audioBase64);
+    const buf = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
+    const blob = new Blob([buf], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+
+    setVisemeFrames(visemes);
+    setPlayheadMs(0);
+
+    el.src = url;
+    el.load();
+
+    // ── Scale viseme timeline to exactly match the real audio duration ─────
+    // This is the key sync fix: whether Google returned real timepoints or
+    // we estimated them, we always stretch/compress to the exact audio length.
+    const onMetadata = () => {
+      if (playTokenRef.current !== token) return;
+      const audioDurationMs = el.duration * 1000;
+      if (!isFinite(audioDurationMs) || audioDurationMs <= 0 || visemes.length === 0) return;
+
+      const estimatedDurationMs = visemes[visemes.length - 1].t;
+      if (estimatedDurationMs <= 0) return;
+
+      const scale = audioDurationMs / estimatedDurationMs;
+      // Only rescale if there's a meaningful mismatch (>5%)
+      if (Math.abs(scale - 1) > 0.05) {
+        const scaled = visemes.map((f) => ({ ...f, t: Math.round(f.t * scale) }));
+        setVisemeFrames(scaled);
+        console.log(`[AudioSync] Rescaled visemes x${scale.toFixed(2)} (estimated=${estimatedDurationMs.toFixed(0)}ms, actual=${audioDurationMs.toFixed(0)}ms)`);
+      }
+
+      el.removeEventListener("loadedmetadata", onMetadata);
+    };
+
+    const onPlaying = () => {
+      if (playTokenRef.current !== token) return;
+      startTick(token);
+      el.removeEventListener("playing", onPlaying);
+    };
+    const onEnded = () => {
+      if (playTokenRef.current !== token) return;
+      stopRaf();
+      setPlayheadMs(0);
+      URL.revokeObjectURL(url);
+      el.removeEventListener("ended", onEnded);
+    };
+
+    el.addEventListener("loadedmetadata", onMetadata);
+    el.addEventListener("playing", onPlaying);
+    el.addEventListener("ended", onEnded);
+    void el.play().catch(() => { });
+  }, [startTick, stopRaf]);
+
+  const isTalking = visemeFrames.length > 0 && playheadMs > 0;
+
+  const handleHangUp = () => router.push("/");
 
   return (
     <div className="flex h-screen w-full bg-[#f8f9fa] overflow-hidden">
 
       {/* ── Left Side: Avatar Container (Flex pushing) ── */}
-      <div
-        className="relative flex-1 transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] overflow-hidden h-full drop-shadow-sm"
-      >
-        {/* Full-screen Avatar inside this flex column */}
+      <div className="relative flex-1 transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] overflow-hidden h-full drop-shadow-sm">
         <div className="absolute inset-0">
-          <Avatar isTalking={isTalking} />
+          <Avatar
+            isTalking={isTalking}
+            visemes={visemeFrames}
+            playheadMs={playheadMs}
+          />
         </div>
 
         {/* ── Top Header Bar ── */}
         <div className="absolute left-6 right-6 top-6 z-20 flex items-center justify-between">
-
-          {/* Logo Pill */}
           <div className="flex items-center gap-3 bg-white/90 backdrop-blur-md pl-4 pr-5 py-2.5 rounded-full shadow-md border border-white/50">
             <img src="/logo.png" alt="Singapore Land Group" className="h-8 object-contain" />
             <div className="w-px h-5 bg-gray-200 ml-1"></div>
@@ -128,10 +207,7 @@ export default function ChatPage() {
         </div>
 
         {/* ── Bottom Toolbar Center ── */}
-        <div
-          className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-end gap-5 bg-white/80 backdrop-blur-xl px-8 py-4 rounded-[2rem] shadow-xl border border-white/60"
-        >
-          {/* Timer on the far left of toolbar */}
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-end gap-5 bg-white/80 backdrop-blur-xl px-8 py-4 rounded-[2rem] shadow-xl border border-white/60">
           <div className="mr-4 self-center">
             <CallTimer />
           </div>
@@ -156,8 +232,7 @@ export default function ChatPage() {
           <ToolbarBtn active={isCamOn} onClick={() => setIsCamOn((p) => !p)} label={isCamOn ? "Camera" : "Cam off"}>
             {isCamOn ? (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="23 7 16 12 23 17 23 7" />
-                <rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
+                <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
               </svg>
             ) : (
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -198,12 +273,12 @@ export default function ChatPage() {
         style={{
           width: isChatOpen ? 380 : 0,
           minWidth: isChatOpen ? 380 : 0,
-          borderLeft: isChatOpen ? "1px solid #e2e8f0" : "none"
+          borderLeft: isChatOpen ? "1px solid #e2e8f0" : "none",
         }}
       >
         <div style={{ width: 380, height: "100%", opacity: isChatOpen ? 1 : 0, transition: "opacity 300ms 100ms" }}>
           <Chat
-            onBotMessage={handleBotMessage}
+            onBotSpeech={handleBotSpeech}
             language={lang}
             onClose={() => setIsChatOpen(false)}
             avatarName="Sofia"
