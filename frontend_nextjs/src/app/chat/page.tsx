@@ -38,7 +38,7 @@ interface ToolbarBtnProps {
 
 function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: ToolbarBtnProps) {
   return (
-    <button onClick={onClick} title={label} className="flex flex-col items-center gap-1.5 focus:outline-none group">
+    <button onClick={onClick} title={label} className="flex flex-col items-center justify-center gap-1.5 focus:outline-none group flex-shrink-0">
       <div
         className={`flex items-center justify-center gap-0.5 rounded-full shadow-md transition-all ${danger ? "hover:bg-red-600 active:bg-red-700" : "hover:scale-105 active:scale-95"
           }`}
@@ -57,7 +57,7 @@ function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: Tool
         )}
       </div>
       {label && (
-        <span className="text-xs font-medium text-[#0a2240] opacity-80 group-hover:opacity-100 transition truncate w-16 text-center">
+        <span className="text-xs font-medium text-[#0a2240] opacity-80 group-hover:opacity-100 transition truncate w-16 text-center leading-tight min-h-[1.25rem]">
           {label}
         </span>
       )}
@@ -67,9 +67,9 @@ function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: Tool
 
 export default function ChatPage() {
   const router = useRouter();
-  const [isChatOpen, setIsChatOpen] = useState(false);
-  const [isMicOn, setIsMicOn] = useState(true);
-  const [isCamOn, setIsCamOn] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(true);
+  const [isPttPressed, setIsPttPressed] = useState(false);
+  const [isRecording, setIsRecording] = useState(false);
   const [lang, setLang] = useState("en-US");
 
   // ── Lip sync state ────────────────────────────────────────────────────────
@@ -207,51 +207,49 @@ export default function ChatPage() {
         </div>
 
         {/* ── Bottom Toolbar Center ── */}
-        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-end gap-5 bg-white/80 backdrop-blur-xl px-8 py-4 rounded-[2rem] shadow-xl border border-white/60">
-          <div className="mr-4 self-center">
+        <div className="absolute bottom-6 left-1/2 -translate-x-1/2 z-20 flex items-center gap-5 bg-white/80 backdrop-blur-xl px-8 py-4 rounded-[2rem] shadow-xl border border-white/60">
+          <div className="flex-shrink-0">
             <CallTimer />
           </div>
 
-          <ToolbarBtn active={isMicOn} onClick={() => setIsMicOn((p) => !p)} label={isMicOn ? "Mic" : "Mic off"}>
-            {isMicOn ? (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" />
-                <line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
+          <button
+            onMouseDown={() => setIsPttPressed(true)}
+            onMouseUp={() => setIsPttPressed(false)}
+            onMouseLeave={() => setIsPttPressed(false)}
+            onTouchStart={(e) => { e.preventDefault(); setIsPttPressed(true); }}
+            onTouchEnd={(e) => { e.preventDefault(); setIsPttPressed(false); }}
+            className={`flex items-center justify-center gap-3 rounded-full px-8 h-14 font-bold text-[17px] tracking-wide transition-all shadow-xl select-none relative overflow-hidden group ${isPttPressed || isRecording
+                ? "bg-red-500 text-white scale-95"
+                : "bg-gradient-to-r from-[#c89b3c] to-[#a67c2b] text-white hover:scale-105 active:scale-95"
+              }`}
+          >
+            {isRecording ? (
+              <>
+                <div className="flex gap-1.5 items-center justify-center">
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+                  <div className="w-2.5 h-2.5 bg-white rounded-full animate-bounce"></div>
+                </div>
+                <span>Listening...</span>
+              </>
             ) : (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <line x1="1" y1="1" x2="23" y2="23" />
-                <path d="M9 9v3a3 3 0 0 0 5.12 2.12M15 9.34V4a3 3 0 0 0-5.94-.6" />
-                <path d="M17 16.95A7 7 0 0 1 5 12v-2m14 0v2a7 7 0 0 1-.11 1.23" />
-                <line x1="12" y1="19" x2="12" y2="23" /><line x1="8" y1="23" x2="16" y2="23" />
-              </svg>
+              <>
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+                  <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" />
+                  <line x1="8" y1="23" x2="16" y2="23" />
+                </svg>
+                <span>Push to Talk</span>
+              </>
             )}
-          </ToolbarBtn>
 
-          <ToolbarBtn active={isCamOn} onClick={() => setIsCamOn((p) => !p)} label={isCamOn ? "Camera" : "Cam off"}>
-            {isCamOn ? (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <polygon points="23 7 16 12 23 17 23 7" /><rect x="1" y="5" width="15" height="14" rx="2" ry="2" />
-              </svg>
-            ) : (
-              <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M16 16v1a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h2m5.66 0H14a2 2 0 0 1 2 2v3.34l1 1L23 7v10" />
-                <line x1="1" y1="1" x2="23" y2="23" />
-              </svg>
+            {/* Shimmer effect when idle */}
+            {!isRecording && !isPttPressed && (
+              <div className="absolute inset-0 -translate-x-full group-hover:animate-[shimmer_1.5s_infinite] bg-gradient-to-r from-transparent via-white/20 to-transparent skew-x-12" />
             )}
-          </ToolbarBtn>
+          </button>
 
-          <ToolbarBtn label="Avatars" dropdown>
-            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <circle cx="9" cy="7" r="4" />
-              <path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-              <path d="M16 3.13a4 4 0 0 1 0 7.75" />
-              <path d="M21 21v-2a4 4 0 0 0-3-3.85" />
-            </svg>
-          </ToolbarBtn>
-
-          <div className="w-px h-10 bg-gray-200 self-center mx-1"></div>
+          <div className="w-px h-10 bg-gray-200 flex-shrink-0 mx-1" />
 
           <ToolbarBtn active={isChatOpen} onClick={() => setIsChatOpen((p) => !p)} label="Chat">
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -281,7 +279,9 @@ export default function ChatPage() {
             onBotSpeech={handleBotSpeech}
             language={lang}
             onClose={() => setIsChatOpen(false)}
-            avatarName="Sofia"
+            avatarName="AI Concierge"
+            isPttHoveredOrPressed={isPttPressed}
+            onRecordingStatusChange={(recording) => setIsRecording(recording)}
           />
         </div>
       </div>

@@ -171,6 +171,13 @@ function buildVisemeFrames(
     return frames.sort((a, b) => a.t - b.t);
 }
 
+// ─── Voice selection ────────────────────────────────────────────────────────
+function getVoiceName(language: string): string {
+    if (language.startsWith("zh")) return "cmn-CN-Wavenet-A";
+    const [lang, region] = language.split("-");
+    return `${lang}-${region}-Neural2-F`;
+}
+
 // ─── Google Cloud TTS Client ─────────────────────────────────────────────────
 
 function createTtsClient() {
@@ -185,6 +192,15 @@ function createTtsClient() {
 
 // ─── API Handler ────────────────────────────────────────────────────────────
 
+/** Escape text for use inside SSML/XML so Neural2 accepts it. */
+function escapeSsml(text: string): string {
+    return text
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;");
+}
+
 export async function POST(request: Request) {
     try {
         const { text, language = "en-US" } = await request.json();
@@ -193,29 +209,24 @@ export async function POST(request: Request) {
             return NextResponse.json({ error: "text is required" }, { status: 400 });
         }
 
-        const words = text.trim().split(/\s+/);
+        const words = text.trim().split(/\s+/).filter((w: string) => w.length > 0);
+        if (words.length === 0) {
+            return NextResponse.json({ error: "text is required" }, { status: 400 });
+        }
 
-        // Build SSML with <mark> tags before each word for precise timing
+        // Build SSML with <mark> tags before each word for precise timing. Escape content for valid XML.
         const ssmlBody = words
-            .map((word: string, i: number) => `<mark name="w${i}"/>${word}`)
+            .map((word: string, i: number) => `<mark name="w${i}"/>${escapeSsml(word)}`)
             .join(" ");
         const ssml = `<speak>${ssmlBody}</speak>`;
 
         const client = createTtsClient();
+        const voiceName = getVoiceName(language);
 
         const [response] = await client.synthesizeSpeech({
             input: { ssml },
-            voice: {
-                languageCode: language,
-                ssmlGender: "FEMALE",
-                // Use Neural2 for best quality (enable_time_pointing works with Neural2/Wavenet)
-                name: language.startsWith("zh") ? "cmn-CN-Wavenet-A" : `${language.split("-")[0]}-${language.split("-")[1]}-Neural2-F`,
-            },
-            audioConfig: {
-                audioEncoding: "MP3",
-                speakingRate: 1.0,
-                pitch: 0,
-            },
+            voice: { languageCode: language, ssmlGender: "FEMALE", name: voiceName },
+            audioConfig: { audioEncoding: "MP3", speakingRate: 1.0, pitch: 0 },
             enableTimePointing: ["SSML_MARK"],
         } as any);
 
@@ -229,7 +240,7 @@ export async function POST(request: Request) {
         const timepoints = (resp.timepoints ?? []) as { markName: string; timeSeconds: number }[];
 
         // Diagnostic logging — check if timepoints are coming back from Google
-        console.log(`[TTS] voice=${language} words=${words.length} timepoints=${timepoints.length}`);
+        console.log(`[TTS] voice=${language} (${voiceName}) words=${words.length} timepoints=${timepoints.length}`);
         if (timepoints.length > 0) {
             console.log("[TTS] Sample timepoints:", JSON.stringify(timepoints.slice(0, 3)));
         } else {

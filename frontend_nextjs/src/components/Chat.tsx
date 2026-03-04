@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import ReactMarkdown from "react-markdown";
 import type { VisemeFrame } from "@/types/viseme";
 
 interface Message {
@@ -16,6 +17,8 @@ interface ChatProps {
   language?: string | string[];
   onClose?: () => void;
   avatarName?: string;
+  isPttHoveredOrPressed?: boolean;
+  onRecordingStatusChange?: (isRecording: boolean) => void;
 }
 
 declare global {
@@ -26,7 +29,7 @@ declare global {
 }
 
 const LANGUAGE_NAMES: Record<string, string> = {
-  "en-US": "English",
+  "en-US": "English (US)",
   "zh-CN": "中文 (简体)",
   "zh-TW": "中文 (繁體)",
   "zh-HK": "中文 (香港)",
@@ -48,6 +51,30 @@ function getLanguageName(lang: string): string {
   return LANGUAGE_NAMES[lang] || lang;
 }
 
+/**
+ * Strips markdown and expands common abbreviations so the TTS engine reads it naturally.
+ */
+function cleanTextForTTS(text: string): string {
+  let cleaned = text;
+
+  // 1. Remove Markdown formatting
+  // Remove bold/italic (* or _)
+  cleaned = cleaned.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1");
+  // Remove inline code (`)
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+  // Remove links [text](url) -> text
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  // Remove headings (#)
+  cleaned = cleaned.replace(/^#+\s+/gm, "");
+
+  // 2. Expand common abbreviations
+  cleaned = cleaned.replace(/\be\.g\./gi, "for example");
+  cleaned = cleaned.replace(/\bi\.e\./gi, "that is");
+  cleaned = cleaned.replace(/\betc\./gi, "and so on");
+
+  return cleaned.trim();
+}
+
 function BotAvatar() {
   return (
     <div
@@ -64,6 +91,8 @@ export default function Chat({
   language = "en-US",
   onClose,
   avatarName = "AI Concierge",
+  isPttHoveredOrPressed = false,
+  onRecordingStatusChange,
 }: ChatProps) {
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -116,25 +145,55 @@ export default function Chat({
   }, [onBotSpeech, currentLanguage]);
 
   // ── Chat logic ────────────────────────────────────────────────────────────
-  const handleSend = (textToSend?: string) => {
+  const handleSend = async (textToSend?: string) => {
     const text = textToSend || input;
     if (!text.trim()) return;
-    setMessages((prev) => [
-      ...prev,
-      { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() },
-    ]);
+
+    const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
+
+    setMessages((prev) => [...prev, newUserMessage]);
+
     if (!textToSend) setInput("");
 
-    setTimeout(() => {
+    try {
+      // Prepare history for API. Exclude the welcome message or pass everything.
+      // Let's pass the existing messages (excluding the one we just added since it's sent separately or included)
+      const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
+
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, history }),
+      });
+
+      if (!res.ok) {
+        throw new Error("Failed to fetch from chat API");
+      }
+
+      const data = await res.json();
+
       const botResponse: Message = {
         id: messageIdRef.current++,
-        text: "I received your message: " + text,
+        text: data.text || "Sorry, I am having trouble responding right now.",
         sender: "bot",
         timestamp: new Date(),
       };
+
       setMessages((prev) => [...prev, botResponse]);
-      speakText(botResponse.text);
-    }, 500);
+
+      const spokenText = cleanTextForTTS(botResponse.text);
+      speakText(spokenText);
+
+    } catch (error) {
+      console.error("Chat API error:", error);
+      const errorMessage: Message = {
+        id: messageIdRef.current++,
+        text: "I'm sorry, there was a system error when trying to respond.",
+        sender: "bot",
+        timestamp: new Date(),
+      };
+      setMessages((prev) => [...prev, errorMessage]);
+    }
   };
 
   // ── Speech recognition ────────────────────────────────────────────────────
@@ -154,10 +213,11 @@ export default function Chat({
     recognition.onerror = recognition.onend = () => {
       isRecordingRef.current = false;
       setIsRecording(false);
+      onRecordingStatusChange?.(false);
     };
     recognitionRef.current = recognition;
     return () => recognitionRef.current?.stop();
-  }, [currentLanguage]);
+  }, [currentLanguage, onRecordingStatusChange]);
 
   const startRecord = useCallback(() => {
     if (recognitionRef.current && !isRecordingRef.current) {
@@ -165,9 +225,10 @@ export default function Chat({
         recognitionRef.current.start();
         isRecordingRef.current = true;
         setIsRecording(true);
+        onRecordingStatusChange?.(true);
       } catch { }
     }
-  }, []);
+  }, [onRecordingStatusChange]);
 
   const stopRecord = useCallback(() => {
     if (recognitionRef.current && isRecordingRef.current) {
@@ -198,6 +259,15 @@ export default function Chat({
       window.removeEventListener("keyup", up);
     };
   }, []);
+
+  // Sync external PTT state
+  useEffect(() => {
+    if (isPttHoveredOrPressed) {
+      handlePushToTalkStart();
+    } else {
+      handlePushToTalkEnd();
+    }
+  }, [isPttHoveredOrPressed]);
 
   const toggleLanguage = () => {
     if (availableLanguages.length > 1) {
@@ -240,10 +310,17 @@ export default function Chat({
                   <BotAvatar />
                   <div className="flex-1 min-w-0">
                     <div
-                      className="rounded-2xl rounded-tl-sm px-4 py-3 text-[15px] shadow-sm"
-                      style={{ background: "white", color: "#1e293b", border: "1px solid #f1f5f9", lineHeight: 1.5, display: "inline-block" }}
+                      className="rounded-2xl rounded-tl-sm px-4 py-3 text-[15px] shadow-sm prose prose-sm max-w-none text-[#1e293b]"
+                      style={{ background: "white", border: "1px solid #f1f5f9", lineHeight: 1.5, display: "inline-block" }}
                     >
-                      {message.text}
+                      <ReactMarkdown
+                        components={{
+                          p: ({ node, ...props }) => <p className="m-0" {...props} />,
+                          a: ({ node, ...props }) => <a className="text-[#0a2240] font-semibold hover:underline" {...props} />
+                        }}
+                      >
+                        {message.text}
+                      </ReactMarkdown>
                     </div>
                     <p className="mt-1.5 ml-1 text-[11px] font-medium text-gray-400">
                       {formatTime(message.timestamp)}
@@ -253,7 +330,7 @@ export default function Chat({
               ) : (
                 <div className="flex flex-col items-end w-full pl-8">
                   <div
-                    className="rounded-2xl rounded-tr-sm px-4 py-3 text-[15px] shadow-sm ml-auto"
+                    className="rounded-2xl rounded-tr-sm px-4 py-3 text-[15px] shadow-sm ml-auto whitespace-pre-wrap"
                     style={{ background: "#0a2240", color: "white", lineHeight: 1.5, display: "inline-block" }}
                   >
                     {message.text}
@@ -272,30 +349,6 @@ export default function Chat({
       {/* ── Input Area ── */}
       <div className="p-4 bg-white border-t border-gray-100">
         <div className="flex items-center gap-2 rounded-full border border-gray-200 bg-gray-50 px-2 py-1.5 focus-within:border-[#0a2240] focus-within:ring-1 focus-within:ring-[#0a2240] transition-all">
-          {isSupported && (
-            <button
-              onMouseDown={handlePushToTalkStart}
-              onMouseUp={handlePushToTalkEnd}
-              onMouseLeave={handlePushToTalkEnd}
-              onTouchStart={(e) => { e.preventDefault(); handlePushToTalkStart(); }}
-              onTouchEnd={(e) => { e.preventDefault(); handlePushToTalkEnd(); }}
-              className={`flex-shrink-0 flex items-center justify-center rounded-full transition-colors ${isRecording
-                  ? "bg-red-500 text-white animate-pulse shadow-md"
-                  : "bg-white text-gray-500 hover:text-[#0a2240] shadow-sm border border-gray-100"
-                }`}
-              style={{ width: 34, height: 34 }}
-              title="Hold to talk (Space)"
-            >
-              {isRecording ? (
-                <div className="h-2.5 w-2.5 rounded-full bg-white" />
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" /><path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" />
-                </svg>
-              )}
-            </button>
-          )}
-
           <input
             type="text"
             value={input}

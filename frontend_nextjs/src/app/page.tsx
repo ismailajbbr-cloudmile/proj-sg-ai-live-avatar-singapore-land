@@ -41,7 +41,6 @@ export default function LobbyPage() {
   const [langIndex, setLangIndex] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
-  const [showAvatarsMenu, setShowAvatarsMenu] = useState(false);
   const [showLangMenu, setShowLangMenu] = useState(false);
   const streamRef = useRef<MediaStream | null>(null);
 
@@ -108,47 +107,13 @@ export default function LobbyPage() {
           </p>
         )}
 
-        {/* Bottom controls */}
+        {/* Bottom controls: language selector + tap to start */}
         <div className="mt-8 mb-4 flex items-center gap-4 bg-white p-3 rounded-full shadow-lg border border-gray-100">
-
-          {/* Avatars button */}
-          <div className="relative">
-            <button
-              onClick={() => {
-                setShowAvatarsMenu((p) => !p);
-                setShowLangMenu(false);
-              }}
-              className="flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-[#0a2240] hover:bg-gray-50 transition"
-            >
-              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-                <circle cx="9" cy="7" r="4" /><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2" />
-                <path d="M16 3.13a4 4 0 0 1 0 7.75" /><path d="M21 21v-2a4 4 0 0 0-3-3.85" />
-              </svg>
-              Select Concierge
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {showAvatarsMenu && (
-              <div className="absolute bottom-full mb-3 left-0 rounded-xl p-2 shadow-xl shadow-black/10 w-48 bg-white border border-gray-100 z-50">
-                {["Sofia", "David", "Elena"].map((name) => (
-                  <button key={name} className="w-full rounded-lg px-4 py-3 text-left font-medium text-[#0a2240] hover:bg-gray-50 transition">
-                    {name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          <div className="w-px h-8 bg-gray-200"></div>
 
           {/* Language selector */}
           <div className="relative">
             <button
-              onClick={() => {
-                setShowLangMenu((p) => !p);
-                setShowAvatarsMenu(false);
-              }}
+              onClick={() => setShowLangMenu((p) => !p)}
               className="flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-[#0a2240] hover:bg-gray-50 transition"
             >
               <span className="text-xl">{LANGUAGE_OPTIONS[langIndex].flag}</span>
@@ -178,7 +143,7 @@ export default function LobbyPage() {
             )}
           </div>
 
-          {/* Start video chat button */}
+          {/* Start button */}
           <button
             onClick={handleStartChat}
             disabled={isStarting}
