@@ -87,7 +87,16 @@ export default function ChatPage() {
     el.style.display = "none";
     document.body.appendChild(el);
     audioRef.current = el;
+
+    // Unlock audio context on first user gesture (required by browser autoplay policy)
+    const unlock = () => {
+      el.play().then(() => el.pause()).catch(() => {});
+      window.removeEventListener("pointerdown", unlock);
+    };
+    window.addEventListener("pointerdown", unlock, { once: true });
+
     return () => {
+      window.removeEventListener("pointerdown", unlock);
       if (rafRef.current != null) cancelAnimationFrame(rafRef.current);
       el.pause();
       el.remove();

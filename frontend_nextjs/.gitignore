@@ -24,6 +24,9 @@
 .DS_Store
 *.pem
 
+# GCP service account credentials
+*.json
+
 # debug
 npm-debug.log*
 yarn-debug.log*

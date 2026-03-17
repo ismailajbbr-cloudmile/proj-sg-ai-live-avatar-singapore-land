@@ -1,0 +1,17 @@
+services:
+  frontend:
+    build:
+      context: ./frontend_nextjs
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    env_file:
+      - ./frontend_nextjs/.env.local
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
+    volumes:
+      - ./frontend_nextjs/id-rd-de-rian-pauzi-41e3fe01c8de.json:/app/credentials/gcp-key.json:ro
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    ports:
+      - "3000:3000"
