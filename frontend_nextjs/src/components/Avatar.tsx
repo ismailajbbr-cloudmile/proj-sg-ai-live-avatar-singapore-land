@@ -6,7 +6,7 @@ import { Suspense, useRef, useEffect } from "react";
 import { Group } from "three";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 
-useGLTF.preload("/avatar/avatar_1.glb");
+useGLTF.preload("/avatar/avatar-L7oSo3s2Ds6JI38eWEjN.glb");
 
 // ─── Camera / Display Constants ────────────────────────────────────────────
 // Avatar faces +Z. Camera on the +Z side looks at the face.
@@ -20,26 +20,46 @@ const ENABLE_ZOOM = true, ENABLE_PAN = false, ENABLE_ROTATE = true;
 const MIN_DISTANCE = 1.2, MAX_DISTANCE = 6;
 const AMBIENT_LIGHT_INTENSITY = 2, DIRECTIONAL_LIGHT_INTENSITY = 2, POINT_LIGHT_INTENSITY = 2;
 
-// ─── Viseme → possible morph target names ───────────────────────────────────
-const VISEME_TO_MORPH: Record<string, string[]> = {
-  AA: ["viseme_aa", "mouthOpen", "jawOpen"],
-  AE: ["viseme_ae", "mouthOpen"],
-  AH: ["viseme_ah", "mouthOpen"],
-  AO: ["viseme_ao", "mouthOpen"],
-  EH: ["viseme_eh", "mouthOpen"],
-  ER: ["viseme_er", "mouthOpen"],
-  IY: ["viseme_iy", "mouthSmile"],
-  UW: ["viseme_uw", "mouthRound"],
-  OH: ["viseme_oh", "mouthOpen"],
-  FV: ["viseme_fv", "mouthDentalLip"],
-  L:  ["viseme_l",  "mouthOpen"],
-  MBP:["viseme_mbp","mouthClose"],
-  TH: ["viseme_th", "mouthOpen"],
-  CH: ["viseme_ch", "mouthOpen"],
-  R:  ["viseme_r",  "mouthOpen"],
-  S:  ["viseme_s",  "mouthOpen"],
-  T:  ["viseme_t",  "mouthOpen"],
-  K:  ["viseme_k",  "mouthOpen"],
+// ─── Phoneme → ARKit blend shape combinations ────────────────────────────────
+// Each entry maps a TTS phoneme label to weighted ARKit shapes.
+// The weight from sampleViseme (0–1) is multiplied by each scale value.
+// ARKit available: jawOpen, mouthClose, mouthFunnel, mouthPucker,
+//   mouthSmileLeft/Right, mouthFrownLeft/Right, mouthStretchLeft/Right,
+//   mouthLowerDownLeft/Right, mouthUpperUpLeft/Right, mouthDimpleLeft/Right,
+//   mouthPressLeft/Right, mouthRollLower/Upper, mouthShrugLower/Upper, tongueOut
+type ShapeWeight = { name: string; scale: number };
+const VISEME_TO_ARKIT: Record<string, ShapeWeight[]> = {
+  // Open vowels ──────────────────────────────────────────────────────────────
+  AA: [{ name: "jawOpen", scale: 0.9 }, { name: "mouthLowerDownLeft", scale: 0.4 }, { name: "mouthLowerDownRight", scale: 0.4 }],
+  AO: [{ name: "jawOpen", scale: 0.7 }, { name: "mouthFunnel", scale: 0.4 }],
+  AH: [{ name: "jawOpen", scale: 0.6 }],
+  // Mid vowels ───────────────────────────────────────────────────────────────
+  AE: [{ name: "jawOpen", scale: 0.6 }, { name: "mouthStretchLeft", scale: 0.3 }, { name: "mouthStretchRight", scale: 0.3 }],
+  EH: [{ name: "jawOpen", scale: 0.5 }, { name: "mouthStretchLeft", scale: 0.2 }, { name: "mouthStretchRight", scale: 0.2 }],
+  ER: [{ name: "jawOpen", scale: 0.4 }, { name: "mouthFunnel", scale: 0.25 }],
+  // Close / smile vowels ─────────────────────────────────────────────────────
+  IY: [{ name: "jawOpen", scale: 0.15 }, { name: "mouthSmileLeft", scale: 0.6 }, { name: "mouthSmileRight", scale: 0.6 }],
+  // Rounded vowels ───────────────────────────────────────────────────────────
+  UW: [{ name: "mouthFunnel", scale: 0.8 }, { name: "mouthPucker", scale: 0.5 }, { name: "jawOpen", scale: 0.15 }],
+  OH: [{ name: "jawOpen", scale: 0.5 }, { name: "mouthFunnel", scale: 0.5 }],
+  // Bilabial stops (M, B, P) — lips pressed ─────────────────────────────────
+  MBP:[{ name: "mouthClose", scale: 0.9 }],
+  // Labiodental (F, V) — lower lip under upper teeth ────────────────────────
+  FV: [{ name: "mouthLowerDownLeft", scale: 0.4 }, { name: "mouthLowerDownRight", scale: 0.4 }, { name: "jawOpen", scale: 0.1 }],
+  // Dental / interdental (TH) ────────────────────────────────────────────────
+  TH: [{ name: "jawOpen", scale: 0.25 }, { name: "mouthLowerDownLeft", scale: 0.15 }, { name: "mouthLowerDownRight", scale: 0.15 }],
+  // Alveolar stop (T, D) ────────────────────────────────────────────────────
+  T:  [{ name: "jawOpen", scale: 0.2 }],
+  // Lateral (L) ─────────────────────────────────────────────────────────────
+  L:  [{ name: "jawOpen", scale: 0.3 }],
+  // Fricative (S, Z) ────────────────────────────────────────────────────────
+  S:  [{ name: "jawOpen", scale: 0.12 }],
+  // Affricate (CH, J) ───────────────────────────────────────────────────────
+  CH: [{ name: "jawOpen", scale: 0.25 }, { name: "mouthFunnel", scale: 0.2 }],
+  // Approximant (R) ─────────────────────────────────────────────────────────
+  R:  [{ name: "jawOpen", scale: 0.25 }, { name: "mouthFunnel", scale: 0.15 }],
+  // Velar stop (K, G) ───────────────────────────────────────────────────────
+  K:  [{ name: "jawOpen", scale: 0.4 }],
 };
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -67,24 +87,77 @@ function sampleViseme(visemes: VisemeFrame[], playheadMs: number): { label: stri
 }
 
 // ─── Gesture arm poses ────────────────────────────────────────────────────────
-// feat/demo forearm Z=±2.5 works with the close-in camera (arms fold naturally
-// in front of the body). Mirror Z for right side.
-const LEFT_FA  = [-1.5, 0, 2.5]  as const;
-const LEFT_H   = [-0.5,-0.8,-0.1] as const;
-const RIGHT_FA = [-1.5, 0,-2.5]  as const;
-const RIGHT_H  = [-0.5, 0.8, 0.1] as const;
+// Each tuple is [x, y, z] Euler rotation for: upper arm, forearm, hand
+// Left side uses positive Z values, right side mirrors with negative Z.
+type ArmPose = {
+  la:  readonly [number,number,number]; // LeftArm (upper arm)
+  lfa: readonly [number,number,number]; // LeftForeArm
+  lh:  readonly [number,number,number]; // LeftHand
+  ra:  readonly [number,number,number]; // RightArm
+  rfa: readonly [number,number,number]; // RightForeArm
+  rh:  readonly [number,number,number]; // RightHand
+};
 
 const GESTURE_MOTION: Record<AvatarGesture, {
   head: { x: number; y: number; z: number; duration: number };
-  lfa: readonly [number,number,number]; lh: readonly [number,number,number];
-  rfa: readonly [number,number,number]; rh: readonly [number,number,number];
+  arms: ArmPose;
 }> = {
-  idle:    { head: { x:0, y:0, z:0, duration:0 },      lfa:LEFT_FA,  lh:LEFT_H,   rfa:RIGHT_FA, rh:RIGHT_H },
-  nod:     { head: { x:0.25,y:0,z:0,duration:0.4 },    lfa:LEFT_FA,  lh:LEFT_H,   rfa:RIGHT_FA, rh:RIGHT_H },
-  shake:   { head: { x:0,y:0.3,z:0,duration:0.4 },     lfa:LEFT_FA,  lh:LEFT_H,   rfa:RIGHT_FA, rh:RIGHT_H },
-  tilt:    { head: { x:0,y:0,z:0.22,duration:0.6 },    lfa:LEFT_FA,  lh:LEFT_H,   rfa:RIGHT_FA, rh:RIGHT_H },
-  lookup:  { head: { x:-0.2,y:0,z:0,duration:0.5 },    lfa:LEFT_FA,  lh:LEFT_H,   rfa:RIGHT_FA, rh:RIGHT_H },
-  excited: { head: { x:0.15,y:0.1,z:0.08,duration:0.3},lfa:LEFT_FA,  lh:LEFT_H,   rfa:RIGHT_FA, rh:RIGHT_H },
+  // Both arms: positive x = arm hangs DOWN, negative x = arm raised UP
+  // (confirmed empirically: la.x=+1.4 correct, ra.x=-1.4 was raised)
+  // x=+1.4 → arm hangs down; z=+0.2/-0.2 → nudge arms slightly forward (away from hips)
+  idle: {
+    head: { x: 0, y: 0, z: 0, duration: 0 },
+    arms: {
+      la:  [+1.4, 0, +0.2], ra:  [+1.4, 0, -0.2],
+      lfa: [0,    0, 0    ], rfa: [0,    0, 0    ],
+      lh:  [0,    0, 0    ], rh:  [0,    0, 0    ],
+    },
+  },
+  // Nod — arms relaxed at sides
+  nod: {
+    head: { x: 0.25, y: 0, z: 0, duration: 0.4 },
+    arms: {
+      la:  [+1.4, 0, +0.2], ra:  [+1.4, 0, -0.2],
+      lfa: [0,    0, 0    ], rfa: [0,    0, 0    ],
+      lh:  [0,    0, 0    ], rh:  [0,    0, 0    ],
+    },
+  },
+  // Shake — arms slightly open
+  shake: {
+    head: { x: 0, y: 0.3, z: 0, duration: 0.4 },
+    arms: {
+      la:  [+0.8, 0, +0.2], ra:  [+0.8, 0, -0.2],
+      lfa: [0,    0, 0    ], rfa: [0,    0, 0    ],
+      lh:  [0,    0, 0    ], rh:  [0,    0, 0    ],
+    },
+  },
+  // Tilt — thinking: right arm raised toward face, left arm down
+  tilt: {
+    head: { x: 0, y: 0, z: 0.22, duration: 0.6 },
+    arms: {
+      la:  [+1.4, 0, +0.2], ra:  [-0.5, 0, -0.2],
+      lfa: [0,    0, 0    ], rfa: [0,    0, 0    ],
+      lh:  [0,    0, 0    ], rh:  [0,    0, 0    ],
+    },
+  },
+  // Lookup — arms relaxed at sides
+  lookup: {
+    head: { x: -0.2, y: 0, z: 0, duration: 0.5 },
+    arms: {
+      la:  [+1.4, 0, +0.2], ra:  [+1.4, 0, -0.2],
+      lfa: [0,    0, 0    ], rfa: [0,    0, 0    ],
+      lh:  [0,    0, 0    ], rh:  [0,    0, 0    ],
+    },
+  },
+  // Excited — both arms raised up
+  excited: {
+    head: { x: 0.15, y: 0.1, z: 0.08, duration: 0.3 },
+    arms: {
+      la:  [-0.5, 0, +0.2], ra:  [-0.5, 0, -0.2],
+      lfa: [0,    0, 0    ], rfa: [0,    0, 0    ],
+      lh:  [0,    0, 0    ], rh:  [0,    0, 0    ],
+    },
+  },
 };
 
 // ─── Avatar Model ─────────────────────────────────────────────────────────────
@@ -100,10 +173,12 @@ function AvatarModel({ isTalking, visemes = [], playheadMs = 0, gesture = "idle"
   const IDLE_MOUTH_OPEN = 0, IDLE_MOUTH_SMILE = 0.2;
   const BLINK_INTERVAL = 10, BLINK_DURATION = 0.2;
 
-  const { scene, nodes } = useGLTF("/avatar/avatar_1.glb");
+  const { scene, nodes } = useGLTF("/avatar/avatar-L7oSo3s2Ds6JI38eWEjN.glb");
   const groupRef         = useRef<Group>(null);
   const headRef          = useRef<any>(null);
   const neckRef          = useRef<any>(null);
+  const leftArmRef       = useRef<any>(null);
+  const rightArmRef      = useRef<any>(null);
   const leftHandRef      = useRef<any>(null);
   const rightHandRef     = useRef<any>(null);
   const leftForeArmRef   = useRef<any>(null);
@@ -113,23 +188,27 @@ function AvatarModel({ isTalking, visemes = [], playheadMs = 0, gesture = "idle"
   const leftEyeMeshRef   = useRef<any>(null);
   const rightEyeMeshRef  = useRef<any>(null);
 
-  const visemeIndexMap  = useRef<Record<string, number>>({});
+  // phoneme → [{idx, scale}] built from ARKit dict in useEffect
+  const visemeShapeMap  = useRef<Record<string, Array<{ idx: number; scale: number }>>>({});
   const dampedMorphRef  = useRef<Record<number, number>>({});
   const headRotDampRef  = useRef({ x: 0, y: 0, z: 0 });
   const gestureRef      = useRef<{ gesture: AvatarGesture; startTime: number }>({ gesture: "idle", startTime: 0 });
-  const dampedArmRef    = useRef({
-    lfa: { x: LEFT_FA[0],  y: LEFT_FA[1],  z: LEFT_FA[2]  },
-    lh:  { x: LEFT_H[0],   y: LEFT_H[1],   z: LEFT_H[2]   },
-    rfa: { x: RIGHT_FA[0], y: RIGHT_FA[1], z: RIGHT_FA[2] },
-    rh:  { x: RIGHT_H[0],  y: RIGHT_H[1],  z: RIGHT_H[2]  },
+  const IDLE = GESTURE_MOTION.idle.arms;
+  const dampedArmRef = useRef({
+    la:  { x: IDLE.la[0],  y: IDLE.la[1],  z: IDLE.la[2]  },
+    lfa: { x: IDLE.lfa[0], y: IDLE.lfa[1], z: IDLE.lfa[2] },
+    lh:  { x: IDLE.lh[0],  y: IDLE.lh[1],  z: IDLE.lh[2]  },
+    ra:  { x: IDLE.ra[0],  y: IDLE.ra[1],  z: IDLE.ra[2]  },
+    rfa: { x: IDLE.rfa[0], y: IDLE.rfa[1], z: IDLE.rfa[2] },
+    rh:  { x: IDLE.rh[0],  y: IDLE.rh[1],  z: IDLE.rh[2]  },
   });
 
   useEffect(() => {
     if (!scene || !nodes) return;
     scene.traverse((child: any) => {
       if (child.isMesh && child.morphTargetInfluences) {
-        if (child.name === "Wolf3D_Head"  && !headMeshRef.current)      headMeshRef.current      = child;
-        if (child.name === "Wolf3D_Teeth" && !teethMeshRef.current)     teethMeshRef.current     = child;
+        if ((child.name === "Wolf3D_Head" || child.name === "Streamoji_Head") && !headMeshRef.current)   headMeshRef.current  = child;
+        if ((child.name === "Wolf3D_Teeth"|| child.name === "Streamoji_Teeth") && !teethMeshRef.current) teethMeshRef.current = child;
         if (child.name === "EyeLeft"      && !leftEyeMeshRef.current)   leftEyeMeshRef.current   = child;
         if (child.name === "EyeRight"     && !rightEyeMeshRef.current)  rightEyeMeshRef.current  = child;
       }
@@ -137,6 +216,8 @@ function AvatarModel({ isTalking, visemes = [], playheadMs = 0, gesture = "idle"
         const n = child.name || "";
         if (n.toLowerCase() === "head"  && !headRef.current)         headRef.current         = child;
         if (n === "Neck"                && !neckRef.current)          neckRef.current         = child;
+        if (n === "LeftArm"             && !leftArmRef.current)       leftArmRef.current      = child;
+        if (n === "RightArm"            && !rightArmRef.current)      rightArmRef.current     = child;
         if (n === "LeftHand"            && !leftHandRef.current)      leftHandRef.current     = child;
         if (n === "RightHand"           && !rightHandRef.current)     rightHandRef.current    = child;
         if (n === "LeftForeArm"         && !leftForeArmRef.current)   leftForeArmRef.current  = child;
@@ -148,20 +229,18 @@ function AvatarModel({ isTalking, visemes = [], playheadMs = 0, gesture = "idle"
 
     if (headMeshRef.current?.morphTargetDictionary) {
       const dict = headMeshRef.current.morphTargetDictionary as Record<string, number>;
-      const map: Record<string, number> = {};
-      for (const [visLabel, candidates] of Object.entries(VISEME_TO_MORPH)) {
-        for (const candidate of candidates) {
-          if (dict[candidate] !== undefined) { map[visLabel] = dict[candidate]; break; }
-          const found = Object.keys(dict).find(k => k.toLowerCase() === candidate.toLowerCase());
-          if (found !== undefined) { map[visLabel] = dict[found]; break; }
-        }
+      // Build phoneme → [{idx, scale}] from ARKit blend shapes
+      const shapeMap: Record<string, Array<{ idx: number; scale: number }>> = {};
+      for (const [phoneme, shapes] of Object.entries(VISEME_TO_ARKIT)) {
+        const resolved = shapes
+          .map(s => ({ idx: dict[s.name], scale: s.scale }))
+          .filter(s => s.idx !== undefined) as Array<{ idx: number; scale: number }>;
+        if (resolved.length > 0) shapeMap[phoneme] = resolved;
       }
-      if (map["AA"] === undefined) {
-        for (const k of Object.keys(dict)) {
-          if (k.toLowerCase().includes("mouthopen") || k.toLowerCase().includes("jawopen")) { map["AA"] = dict[k]; break; }
-        }
-      }
-      visemeIndexMap.current = map;
+      visemeShapeMap.current = shapeMap;
+      const missed = Object.keys(VISEME_TO_ARKIT).filter(p => !shapeMap[p]);
+      console.log("[Avatar] ARKit shape map built:", Object.keys(shapeMap).length, "phonemes resolved",
+        missed.length ? `| MISSING: ${missed.join(", ")}` : "| all matched ✓");
     }
   }, [scene, nodes]);
 
@@ -209,72 +288,86 @@ function AvatarModel({ isTalking, visemes = [], playheadMs = 0, gesture = "idle"
       headRef.current.scale.set(1, 1, 1);
     }
 
-    // ── Lip sync ──────────────────────────────────────────────────────────────
+    // ── Lip sync (ARKit blend shapes) ────────────────────────────────────────
     if (headMeshRef.current?.morphTargetInfluences) {
       const influ = headMeshRef.current.morphTargetInfluences as number[];
       const dict  = headMeshRef.current.morphTargetDictionary  as Record<string, number>;
-      const DAMP = 0.18, JAW_BASE = 0.12, TALKING_SMILE = 0.12;
+      const DAMP = 0.18;
       const targets: Record<number, number> = {};
 
       if (isTalking && visemes.length > 0) {
         const { label, mouth } = sampleViseme(visemes, playheadMs);
         const weight = clamp01(mouth);
-        if (label && visemeIndexMap.current[label] !== undefined) targets[visemeIndexMap.current[label]] = weight;
-        const mIdx = dict["mouthOpen"] ?? dict["jawOpen"];
-        if (mIdx !== undefined) targets[mIdx] = Math.max(targets[mIdx] ?? 0, JAW_BASE + weight * 0.38);
-        const sIdx = dict["mouthSmile"];
-        if (sIdx !== undefined) targets[sIdx] = Math.max(targets[sIdx] ?? 0, (label === "IY" || label === "EH") ? 0.35 : TALKING_SMILE);
+
+        // Apply ARKit shape combination for this phoneme
+        if (label) {
+          for (const { idx, scale } of visemeShapeMap.current[label] ?? []) {
+            targets[idx] = Math.max(targets[idx] ?? 0, weight * scale);
+          }
+        }
+        // Jaw base layer: always open proportionally even during consonants
+        const jawIdx = dict["jawOpen"];
+        if (jawIdx !== undefined) targets[jawIdx] = Math.max(targets[jawIdx] ?? 0, 0.08 + weight * 0.25);
+        // Persistent subtle smile during speech
+        const smLIdx = dict["mouthSmileLeft"], smRIdx = dict["mouthSmileRight"];
+        if (smLIdx !== undefined) targets[smLIdx] = Math.max(targets[smLIdx] ?? 0, 0.1);
+        if (smRIdx !== undefined) targets[smRIdx] = Math.max(targets[smRIdx] ?? 0, 0.1);
       } else {
-        if (dict["mouthOpen"]  !== undefined) targets[dict["mouthOpen"]]  = IDLE_MOUTH_OPEN;
-        if (dict["mouthSmile"] !== undefined) targets[dict["mouthSmile"]] = IDLE_MOUTH_SMILE;
+        // Idle: closed jaw, gentle resting smile
+        const jawIdx = dict["jawOpen"];
+        if (jawIdx !== undefined) targets[jawIdx] = IDLE_MOUTH_OPEN;
+        const smLIdx = dict["mouthSmileLeft"], smRIdx = dict["mouthSmileRight"];
+        if (smLIdx !== undefined) targets[smLIdx] = IDLE_MOUTH_SMILE;
+        if (smRIdx !== undefined) targets[smRIdx] = IDLE_MOUTH_SMILE;
       }
 
+      // Damped convergence for all morphs
       const damped = dampedMorphRef.current;
       for (let i = 0; i < influ.length; i++) {
         const next = (damped[i] ?? 0) + ((targets[i] ?? 0) - (damped[i] ?? 0)) * DAMP;
         damped[i] = next; influ[i] = next;
       }
 
+      // Teeth: mirror jaw opening from head mesh
       if (teethMeshRef.current?.morphTargetInfluences) {
         const tDict = teethMeshRef.current.morphTargetDictionary as Record<string, number>;
-        const mIdx = tDict["mouthOpen"];
-        if (mIdx !== undefined) {
-          const jawIdx = dict["mouthOpen"] ?? dict["jawOpen"];
-          teethMeshRef.current.morphTargetInfluences[mIdx] = jawIdx !== undefined ? (dampedMorphRef.current[jawIdx] ?? 0) * 0.6 : 0;
+        const jawIdx = dict["jawOpen"];
+        const tJawIdx = tDict["jawOpen"];
+        if (jawIdx !== undefined && tJawIdx !== undefined) {
+          teethMeshRef.current.morphTargetInfluences[tJawIdx] = (dampedMorphRef.current[jawIdx] ?? 0);
         }
       }
     }
 
-    // ── Blink ─────────────────────────────────────────────────────────────────
+    // ── Blink (ARKit eyeBlinkLeft / eyeBlinkRight) ────────────────────────────
     const blinkValue = (t % BLINK_INTERVAL) < BLINK_DURATION
       ? Math.sin(((t % BLINK_INTERVAL) / BLINK_DURATION) * Math.PI) : 0;
     if (headMeshRef.current?.morphTargetInfluences) {
       const dict = headMeshRef.current.morphTargetDictionary as Record<string, number>;
-      if (dict["eyesClosed"] !== undefined) headMeshRef.current.morphTargetInfluences[dict["eyesClosed"]] = blinkValue;
-      else {
-        leftEyeMeshRef.current?.scale.set(1, 1 - blinkValue, 1);
-        rightEyeMeshRef.current?.scale.set(1, 1 - blinkValue, 1);
-      }
-    } else {
-      leftEyeMeshRef.current?.scale.set(1, 1 - blinkValue, 1);
-      rightEyeMeshRef.current?.scale.set(1, 1 - blinkValue, 1);
+      if (dict["eyeBlinkLeft"]  !== undefined) headMeshRef.current.morphTargetInfluences[dict["eyeBlinkLeft"]]  = blinkValue;
+      if (dict["eyeBlinkRight"] !== undefined) headMeshRef.current.morphTargetInfluences[dict["eyeBlinkRight"]] = blinkValue;
     }
 
     // ── Neck & arms ───────────────────────────────────────────────────────────
     if (neckRef.current) neckRef.current.rotation.x = NECK_ROTATION_X;
 
     const armK = 1 - Math.exp(-2.0 * dt);
-    const gm = GESTURE_MOTION[gesture];
+    const ap = GESTURE_MOTION[gesture].arms;
     const da = dampedArmRef.current;
-    da.lfa.x += (gm.lfa[0] - da.lfa.x) * armK; da.lfa.y += (gm.lfa[1] - da.lfa.y) * armK; da.lfa.z += (gm.lfa[2] - da.lfa.z) * armK;
-    da.lh.x  += (gm.lh[0]  - da.lh.x)  * armK; da.lh.y  += (gm.lh[1]  - da.lh.y)  * armK; da.lh.z  += (gm.lh[2]  - da.lh.z)  * armK;
-    da.rfa.x += (gm.rfa[0] - da.rfa.x) * armK; da.rfa.y += (gm.rfa[1] - da.rfa.y) * armK; da.rfa.z += (gm.rfa[2] - da.rfa.z) * armK;
-    da.rh.x  += (gm.rh[0]  - da.rh.x)  * armK; da.rh.y  += (gm.rh[1]  - da.rh.y)  * armK; da.rh.z  += (gm.rh[2]  - da.rh.z)  * armK;
+    const lerpTo = (cur: {x:number;y:number;z:number}, tgt: readonly [number,number,number]) => {
+      cur.x += (tgt[0] - cur.x) * armK;
+      cur.y += (tgt[1] - cur.y) * armK;
+      cur.z += (tgt[2] - cur.z) * armK;
+    };
+    lerpTo(da.la,  ap.la);  lerpTo(da.lfa, ap.lfa); lerpTo(da.lh,  ap.lh);
+    lerpTo(da.ra,  ap.ra);  lerpTo(da.rfa, ap.rfa); lerpTo(da.rh,  ap.rh);
 
+    leftArmRef.current?.rotation.set(da.la.x, da.la.y, da.la.z);
     leftForeArmRef.current?.rotation.set(da.lfa.x, da.lfa.y, da.lfa.z);
-    leftHandRef.current?.rotation.set(da.lh.x, da.lh.y, da.lh.z);
+    leftHandRef.current?.rotation.set(da.lh.x,   da.lh.y,  da.lh.z);
+    rightArmRef.current?.rotation.set(da.ra.x, da.ra.y, da.ra.z);
     rightForeArmRef.current?.rotation.set(da.rfa.x, da.rfa.y, da.rfa.z);
-    rightHandRef.current?.rotation.set(da.rh.x, da.rh.y, da.rh.z);
+    rightHandRef.current?.rotation.set(da.rh.x,   da.rh.y,  da.rh.z);
   });
 
   return (
