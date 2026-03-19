@@ -236,6 +236,10 @@ logs/
 credentials
 config
 
+# GCP service account keys (NEVER COMMIT THESE!)
+*-key.json
+frontend_nextjs/*.json
+
 # Environment variables
 .env
 .env.*
@@ -251,3 +255,5 @@ config
 *.backup
 *~
 
+.claude
+CLAUDE.md
