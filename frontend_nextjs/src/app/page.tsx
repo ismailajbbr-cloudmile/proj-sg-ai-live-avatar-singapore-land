@@ -5,9 +5,9 @@ import { useRouter } from "next/navigation";
 
 // Page Name: Lobby
 // Route: /
-// Description: Pre-call lobby screen — Singapore Land corporate theme
+// Description: Pre-call lobby screen — Marina Square theme
 
-const AVATAR_NAME = "Singapore Land AI Concierge";
+const AVATAR_NAME = "Marina Square AI Concierge";
 
 const LANGUAGE_OPTIONS = [
   { code: "en-US", label: "English", flag: "🇺🇸" },
@@ -21,7 +21,7 @@ function SingaporeLandLogo() {
       <div className="flex items-end h-[40px] gap-0.5">
         <div className="w-[12px] h-[24px] bg-[#0a2240]" style={{ clipPath: "polygon(0 30%, 100% 0, 100% 100%, 0 100%)" }} />
         <div className="w-[12px] h-[36px] bg-[#0a2240]" style={{ clipPath: "polygon(0 15%, 100% 0, 100% 100%, 0 100%)" }} />
-        <div className="w-[12px] h-[20px] bg-[#c89b3c]" style={{ clipPath: "polygon(0 0, 100% 30%, 100% 100%, 0 100%)" }} />
+        <div className="w-[12px] h-[20px] bg-[#e8197a]" style={{ clipPath: "polygon(0 0, 100% 30%, 100% 100%, 0 100%)" }} />
       </div>
       {/* Logotype */}
       <div className="flex flex-col">
@@ -75,7 +75,7 @@ export default function LobbyPage() {
 
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 right-0 h-20 bg-white shadow-sm flex items-center justify-between px-8 z-10 w-full">
-        <img src="/logo.png" alt="Singapore Land Group" className="h-12 object-contain" />
+        <img src="/logo-marinasquare.png" alt="Marina Square" className="h-12 object-contain" />
         <div className="text-[#0a2240] font-medium tracking-wide">
           AI Concierge Kiosk
         </div>
@@ -133,7 +133,7 @@ export default function LobbyPage() {
                     <span className="text-xl">{lang.flag}</span>
                     {lang.label}
                     {i === langIndex && (
-                      <svg className="ml-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#c89b3c" strokeWidth="3">
+                      <svg className="ml-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2323a8" strokeWidth="3">
                         <path d="M20 6L9 17l-5-5" />
                       </svg>
                     )}
@@ -147,9 +147,9 @@ export default function LobbyPage() {
           <button
             onClick={handleStartChat}
             disabled={isStarting}
-            className="flex items-center gap-3 rounded-full px-10 py-3.5 text-[15px] font-bold text-white shadow-xl shadow-[#c89b3c]/30 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-70 disabled:hover:scale-100"
+            className="flex items-center gap-3 rounded-full px-10 py-3.5 text-[15px] font-bold text-white shadow-xl shadow-[#2323a8]/30 hover:scale-[1.02] active:scale-[0.98] transition-all disabled:opacity-70 disabled:hover:scale-100"
             style={{
-              background: isStarting ? "#b38a36" : "linear-gradient(135deg, #c89b3c 0%, #a67c2b 100%)",
+              background: isStarting ? "#1a1a8a" : "linear-gradient(135deg, #2323a8 0%, #00b5ad 100%)",
             }}
           >
             {isStarting ? (

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import ReactMarkdown from "react-markdown";
-import type { VisemeFrame } from "@/types/viseme";
+import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 
 interface Message {
   id: number;
@@ -12,8 +12,10 @@ interface Message {
 }
 
 interface ChatProps {
-  /** Called whenever the bot has a new spoken response ready */
-  onBotSpeech?: (audioBase64: string, mimeType: string, visemes: VisemeFrame[]) => void;
+  /** Called whenever the bot has a new spoken sentence ready */
+  onBotSpeech?: (audioBase64: string, mimeType: string, visemes: VisemeFrame[], gesture: AvatarGesture) => void;
+  /** Called when the user sends a new message — clears any queued audio */
+  onClearSpeech?: () => void;
   language?: string | string[];
   onClose?: () => void;
   avatarName?: string;
@@ -75,6 +77,21 @@ function cleanTextForTTS(text: string): string {
   return cleaned.trim();
 }
 
+/** Splits buffer on sentence boundaries (.?!) followed by whitespace.
+ *  Returns complete sentences and the remaining partial sentence. */
+function extractSentences(buffer: string): { sentences: string[]; rest: string } {
+  const sentences: string[] = [];
+  const regex = /[.?!]+\s+/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = regex.exec(buffer)) !== null) {
+    const sentence = buffer.slice(lastIndex, match.index + match[0].length).trim();
+    if (sentence) sentences.push(sentence);
+    lastIndex = match.index + match[0].length;
+  }
+  return { sentences, rest: buffer.slice(lastIndex) };
+}
+
 function BotAvatar() {
   return (
     <div
@@ -88,6 +105,7 @@ function BotAvatar() {
 
 export default function Chat({
   onBotSpeech,
+  onClearSpeech,
   language = "en-US",
   onClose,
   avatarName = "AI Concierge",
@@ -97,7 +115,7 @@ export default function Chat({
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
-      text: `Welcome to Singapore Land Group. I'm your ${avatarName}. How can I assist you today?`,
+      text: `Welcome to Marina Square. I'm your ${avatarName}. How can I assist you today?`,
       sender: "bot",
       timestamp: new Date(),
     },
@@ -106,11 +124,17 @@ export default function Chat({
   const [isRecording, setIsRecording] = useState(false);
   const [isSupported, setIsSupported] = useState(false);
   const [isTtsBusy, setIsTtsBusy] = useState(false);
+  const [isThinking, setIsThinking] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const recognitionRef = useRef<any>(null);
   const isPressingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const messageIdRef = useRef(2);
+
+  // Sequential TTS queue — ensures sentences are spoken in order
+  // even if TTS API responses arrive out of order
+  const ttsQueueRef = useRef<Array<{ text: string; gesture: AvatarGesture }>>([]);
+  const ttsProcessingRef = useRef(false);
 
   const availableLanguages = getAvailableLanguages(language);
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
@@ -118,10 +142,10 @@ export default function Chat({
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, isThinking]);
 
   // ── TTS via Next.js API ───────────────────────────────────────────────────
-  const speakText = useCallback(async (text: string) => {
+  const speakText = useCallback(async (text: string, gesture: AvatarGesture = "idle") => {
     if (!onBotSpeech) return;
     setIsTtsBusy(true);
     try {
@@ -136,7 +160,7 @@ export default function Chat({
         return;
       }
       const { audioBase64, mimeType, visemes } = await res.json();
-      onBotSpeech(audioBase64, mimeType, visemes);
+      onBotSpeech(audioBase64, mimeType, visemes, gesture);
     } catch (err) {
       console.error("[TTS] fetch failed:", err);
     } finally {
@@ -144,55 +168,119 @@ export default function Chat({
     }
   }, [onBotSpeech, currentLanguage]);
 
+  // ── Sequential TTS processor ─────────────────────────────────────────────
+  // Drains ttsQueueRef one item at a time, awaiting each speakText call so
+  // that onBotSpeech is always invoked in sentence order, never out of order.
+  const processTtsQueue = useCallback(async () => {
+    if (ttsProcessingRef.current) return;
+    ttsProcessingRef.current = true;
+    while (ttsQueueRef.current.length > 0) {
+      const item = ttsQueueRef.current.shift()!;
+      await speakText(item.text, item.gesture);
+    }
+    ttsProcessingRef.current = false;
+  }, [speakText]);
+
+  const enqueueTts = useCallback((text: string, gesture: AvatarGesture) => {
+    ttsQueueRef.current.push({ text, gesture });
+    processTtsQueue();
+  }, [processTtsQueue]);
+
   // ── Chat logic ────────────────────────────────────────────────────────────
   const handleSend = async (textToSend?: string) => {
     const text = textToSend || input;
-    if (!text.trim()) return;
+    if (!text.trim() || isThinking) return;
 
     const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
-
     setMessages((prev) => [...prev, newUserMessage]);
-
     if (!textToSend) setInput("");
 
-    try {
-      // Prepare history for API. Exclude the welcome message or pass everything.
-      // Let's pass the existing messages (excluding the one we just added since it's sent separately or included)
-      const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
+    onClearSpeech?.();
+    ttsQueueRef.current = [];
+    ttsProcessingRef.current = false;
+    setIsThinking(true);
 
+    const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
+
+    try {
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, history }),
       });
 
-      if (!res.ok) {
-        throw new Error("Failed to fetch from chat API");
+      if (!res.ok) throw new Error("Failed to fetch from chat API");
+
+      const reader = res.body!.getReader();
+      const decoder = new TextDecoder();
+
+      let gesture: AvatarGesture = "idle";
+      const botMessageId = messageIdRef.current++;
+      let fullText = "";
+      let messageAdded = false;
+      let sseBuffer = "";
+      let sentenceBuffer = "";
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        sseBuffer += decoder.decode(value, { stream: true });
+        const events = sseBuffer.split("\n\n");
+        sseBuffer = events.pop() ?? "";
+
+        for (const event of events) {
+          const line = event.trim();
+          if (!line.startsWith("data: ")) continue;
+          try {
+            const parsed = JSON.parse(line.slice(6));
+
+            if (parsed.type === "gesture") {
+              gesture = parsed.value;
+            } else if (parsed.type === "chunk") {
+              setIsThinking(false);
+              fullText += parsed.value;
+              sentenceBuffer += parsed.value;
+
+              if (!messageAdded) {
+                setMessages((prev) => [...prev, { id: botMessageId, text: fullText, sender: "bot", timestamp: new Date() }]);
+                messageAdded = true;
+              } else {
+                setMessages((prev) => prev.map((m) => m.id === botMessageId ? { ...m, text: fullText } : m));
+              }
+
+              // Enqueue TTS for each complete sentence in order
+              const { sentences, rest } = extractSentences(sentenceBuffer);
+              sentenceBuffer = rest;
+              for (const sentence of sentences) {
+                const cleaned = cleanTextForTTS(sentence);
+                if (cleaned) enqueueTts(cleaned, gesture);
+              }
+            } else if (parsed.type === "done") {
+              setIsThinking(false);
+              if (!messageAdded) {
+                setMessages((prev) => [...prev, { id: botMessageId, text: fullText || "Sorry, I am having trouble responding right now.", sender: "bot", timestamp: new Date() }]);
+              }
+              // Flush any remaining text that didn't end with punctuation
+              const remaining = sentenceBuffer.trim();
+              if (remaining) enqueueTts(cleanTextForTTS(remaining), gesture);
+            } else if (parsed.type === "error") {
+              throw new Error(parsed.value);
+            }
+          } catch {
+            // skip malformed SSE event
+          }
+        }
       }
-
-      const data = await res.json();
-
-      const botResponse: Message = {
-        id: messageIdRef.current++,
-        text: data.text || "Sorry, I am having trouble responding right now.",
-        sender: "bot",
-        timestamp: new Date(),
-      };
-
-      setMessages((prev) => [...prev, botResponse]);
-
-      const spokenText = cleanTextForTTS(botResponse.text);
-      speakText(spokenText);
-
     } catch (error) {
       console.error("Chat API error:", error);
-      const errorMessage: Message = {
+      setIsThinking(false);
+      setMessages((prev) => [...prev, {
         id: messageIdRef.current++,
         text: "I'm sorry, there was a system error when trying to respond.",
         sender: "bot",
         timestamp: new Date(),
-      };
-      setMessages((prev) => [...prev, errorMessage]);
+      }]);
     }
   };
 
@@ -322,7 +410,7 @@ export default function Chat({
                         {message.text}
                       </ReactMarkdown>
                     </div>
-                    <p className="mt-1.5 ml-1 text-[11px] font-medium text-gray-400">
+                    <p className="mt-1.5 ml-1 text-[11px] font-medium text-gray-400" suppressHydrationWarning>
                       {formatTime(message.timestamp)}
                     </p>
                   </div>
@@ -335,13 +423,26 @@ export default function Chat({
                   >
                     {message.text}
                   </div>
-                  <p className="mt-1.5 mr-1 text-[11px] font-medium text-gray-400">
+                  <p className="mt-1.5 mr-1 text-[11px] font-medium text-gray-400" suppressHydrationWarning>
                     {formatTime(message.timestamp)}
                   </p>
                 </div>
               )}
             </div>
           ))}
+          {isThinking && (
+            <div className="flex items-start gap-3 w-full">
+              <BotAvatar />
+              <div
+                className="rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm flex items-center gap-1.5"
+                style={{ background: "white", border: "1px solid #f1f5f9" }}
+              >
+                <span className="w-2 h-2 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.3s]" />
+                <span className="w-2 h-2 rounded-full bg-gray-400 animate-bounce [animation-delay:-0.15s]" />
+                <span className="w-2 h-2 rounded-full bg-gray-400 animate-bounce" />
+              </div>
+            </div>
+          )}
           <div ref={messagesEndRef} />
         </div>
       </div>
@@ -354,8 +455,9 @@ export default function Chat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleSend()}
-            placeholder="Type your message..."
-            className="flex-1 bg-transparent px-2 text-[15px] text-[#0a2240] placeholder-gray-400 focus:outline-none"
+            placeholder={isThinking ? "AI is thinking..." : "Type your message..."}
+            disabled={isThinking}
+            className="flex-1 bg-transparent px-2 text-[15px] text-[#0a2240] placeholder-gray-400 focus:outline-none disabled:opacity-50"
           />
 
           {availableLanguages.length > 1 && (
@@ -370,7 +472,7 @@ export default function Chat({
           <button
             onClick={() => handleSend()}
             disabled={!input.trim()}
-            className="flex-shrink-0 flex items-center justify-center rounded-full bg-[#c89b3c] text-white transition-opacity disabled:opacity-40 shadow-sm hover:opacity-90"
+            className="flex-shrink-0 flex items-center justify-center rounded-full bg-[#2323a8] text-white transition-opacity disabled:opacity-40 shadow-sm hover:opacity-90"
             style={{ width: 34, height: 34 }}
           >
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginLeft: -1, marginTop: 1 }}>

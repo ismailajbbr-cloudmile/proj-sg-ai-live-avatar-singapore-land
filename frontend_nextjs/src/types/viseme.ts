@@ -20,3 +20,5 @@ export type TtsResponse = {
     mimeType: string;
     visemes: VisemeFrame[];
 };
+
+export type AvatarGesture = "idle" | "nod" | "shake" | "tilt" | "lookup" | "excited";

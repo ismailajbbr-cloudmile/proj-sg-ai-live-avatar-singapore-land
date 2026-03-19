@@ -42,7 +42,7 @@ export default function LoginPage() {
         <div className="flex h-screen w-full bg-[#f8f9fa] flex-col justify-center py-12 sm:px-6 lg:px-8">
             {/* Header */}
             <div className="sm:mx-auto sm:w-full sm:max-w-md flex flex-col items-center">
-                <img src="/logo.png" alt="Singapore Land Group" className="h-16 object-contain mb-6" />
+                <img src="/logo-marinasquare.png" alt="Marina Square" className="h-16 object-contain mb-6" />
                 <h2 className="mt-2 text-center text-2xl font-bold leading-9 tracking-tight text-[#0a2240]">
                     Sign in to your account
                 </h2>

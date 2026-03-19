@@ -4,13 +4,13 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Chat from "@/components/Chat";
-import type { VisemeFrame } from "@/types/viseme";
+import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 
 // Page Name: Chat (In-call)
 // Route: /chat
-// Description: Singapore Land AI Concierge Interface (Push Animation Layout)
+// Description: Marina Square AI Concierge Interface (Push Animation Layout)
 
-const AVATAR_NAME = "Singapore Land AI Concierge";
+const AVATAR_NAME = "Marina Square AI Concierge";
 
 function CallTimer() {
   const [seconds, setSeconds] = useState(0);
@@ -75,11 +75,18 @@ export default function ChatPage() {
   // ── Lip sync state ────────────────────────────────────────────────────────
   const [visemeFrames, setVisemeFrames] = useState<VisemeFrame[]>([]);
   const [playheadMs, setPlayheadMs] = useState(0);
+  const [gesture, setGesture] = useState<AvatarGesture>("idle");
 
   // Hidden audio element for cloud TTS playback
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const rafRef = useRef<number | null>(null);
   const playTokenRef = useRef<number>(0);
+
+  // Audio queue for sentence-by-sentence playback
+  type AudioSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
+  const audioQueueRef = useRef<AudioSegment[]>([]);
+  const isPlayingRef = useRef(false);
+  const playSegmentRef = useRef<((seg: AudioSegment) => void) | null>(null);
 
   useEffect(() => {
     const el = document.createElement("audio");
@@ -125,8 +132,13 @@ export default function ChatPage() {
     rafRef.current = requestAnimationFrame(tick);
   }, [stopRaf]);
 
-  // ── Called by Chat.tsx when Google TTS delivers audio + visemes ────────────
-  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[]) => {
+  // ── Play a single audio segment ─────────────────────────────────────────
+  const playSegment = useCallback((seg: AudioSegment) => {
+    const { audioBase64, mimeType, visemes, gesture: segGesture } = seg;
+
+    setGesture(segGesture);
+    isPlayingRef.current = true;
+
     const token = playTokenRef.current + 1;
     playTokenRef.current = token;
 
@@ -135,7 +147,6 @@ export default function ChatPage() {
 
     try { el.pause(); } catch { }
 
-    // Decode base64 → Blob → Object URL
     const bytes = atob(audioBase64);
     const buf = new Uint8Array(bytes.length);
     for (let i = 0; i < bytes.length; i++) buf[i] = bytes.charCodeAt(i);
@@ -148,25 +159,16 @@ export default function ChatPage() {
     el.src = url;
     el.load();
 
-    // ── Scale viseme timeline to exactly match the real audio duration ─────
-    // This is the key sync fix: whether Google returned real timepoints or
-    // we estimated them, we always stretch/compress to the exact audio length.
     const onMetadata = () => {
       if (playTokenRef.current !== token) return;
       const audioDurationMs = el.duration * 1000;
       if (!isFinite(audioDurationMs) || audioDurationMs <= 0 || visemes.length === 0) return;
-
       const estimatedDurationMs = visemes[visemes.length - 1].t;
       if (estimatedDurationMs <= 0) return;
-
       const scale = audioDurationMs / estimatedDurationMs;
-      // Only rescale if there's a meaningful mismatch (>5%)
       if (Math.abs(scale - 1) > 0.05) {
-        const scaled = visemes.map((f) => ({ ...f, t: Math.round(f.t * scale) }));
-        setVisemeFrames(scaled);
-        console.log(`[AudioSync] Rescaled visemes x${scale.toFixed(2)} (estimated=${estimatedDurationMs.toFixed(0)}ms, actual=${audioDurationMs.toFixed(0)}ms)`);
+        setVisemeFrames(visemes.map((f) => ({ ...f, t: Math.round(f.t * scale) })));
       }
-
       el.removeEventListener("loadedmetadata", onMetadata);
     };
 
@@ -175,12 +177,21 @@ export default function ChatPage() {
       startTick(token);
       el.removeEventListener("playing", onPlaying);
     };
+
     const onEnded = () => {
       if (playTokenRef.current !== token) return;
       stopRaf();
       setPlayheadMs(0);
       URL.revokeObjectURL(url);
       el.removeEventListener("ended", onEnded);
+      // Dequeue next segment or go idle
+      const next = audioQueueRef.current.shift();
+      if (next) {
+        playSegmentRef.current?.(next);
+      } else {
+        isPlayingRef.current = false;
+        setGesture("idle");
+      }
     };
 
     el.addEventListener("loadedmetadata", onMetadata);
@@ -188,6 +199,32 @@ export default function ChatPage() {
     el.addEventListener("ended", onEnded);
     void el.play().catch(() => { });
   }, [startTick, stopRaf]);
+
+  // Keep ref in sync so onEnded can call the latest version without stale closure
+  useEffect(() => { playSegmentRef.current = playSegment; }, [playSegment]);
+
+  // ── Clear all queued and playing audio (called when user sends new message) ─
+  const clearSpeech = useCallback(() => {
+    audioQueueRef.current = [];
+    playTokenRef.current += 1;
+    isPlayingRef.current = false;
+    const el = audioRef.current;
+    if (el) try { el.pause(); } catch { }
+    stopRaf();
+    setPlayheadMs(0);
+    setVisemeFrames([]);
+    setGesture("idle");
+  }, [stopRaf]);
+
+  // ── Called by Chat.tsx for each TTS sentence segment ────────────────────
+  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[], newGesture: AvatarGesture = "idle") => {
+    const seg: AudioSegment = { audioBase64, mimeType, visemes, gesture: newGesture };
+    if (isPlayingRef.current) {
+      audioQueueRef.current.push(seg);
+    } else {
+      playSegment(seg);
+    }
+  }, [playSegment]);
 
   const isTalking = visemeFrames.length > 0 && playheadMs > 0;
 
@@ -203,13 +240,14 @@ export default function ChatPage() {
             isTalking={isTalking}
             visemes={visemeFrames}
             playheadMs={playheadMs}
+            gesture={gesture}
           />
         </div>
 
         {/* ── Top Header Bar ── */}
         <div className="absolute left-6 right-6 top-6 z-20 flex items-center justify-between">
           <div className="flex items-center gap-3 bg-white/90 backdrop-blur-md pl-4 pr-5 py-2.5 rounded-full shadow-md border border-white/50">
-            <img src="/logo.png" alt="Singapore Land Group" className="h-8 object-contain" />
+            <img src="/logo-marinasquare.png" alt="Marina Square" className="h-8 object-contain" />
             <div className="w-px h-5 bg-gray-200 ml-1"></div>
             <span className="text-sm font-semibold text-[#64748b]">AI Concierge</span>
           </div>
@@ -229,7 +267,7 @@ export default function ChatPage() {
             onTouchEnd={(e) => { e.preventDefault(); setIsPttPressed(false); }}
             className={`flex items-center justify-center gap-3 rounded-full px-8 h-14 font-bold text-[17px] tracking-wide transition-all shadow-xl select-none relative overflow-hidden group ${isPttPressed || isRecording
                 ? "bg-red-500 text-white scale-95"
-                : "bg-gradient-to-r from-[#c89b3c] to-[#a67c2b] text-white hover:scale-105 active:scale-95"
+                : "bg-gradient-to-r from-[#2323a8] to-[#00b5ad] text-white hover:scale-105 active:scale-95"
               }`}
           >
             {isRecording ? (
@@ -286,9 +324,10 @@ export default function ChatPage() {
         <div style={{ width: 380, height: "100%", opacity: isChatOpen ? 1 : 0, transition: "opacity 300ms 100ms" }}>
           <Chat
             onBotSpeech={handleBotSpeech}
+            onClearSpeech={clearSpeech}
             language={lang}
             onClose={() => setIsChatOpen(false)}
-            avatarName="AI Concierge"
+            avatarName="Marina Square AI Concierge"
             isPttHoveredOrPressed={isPttPressed}
             onRecordingStatusChange={(recording) => setIsRecording(recording)}
           />
