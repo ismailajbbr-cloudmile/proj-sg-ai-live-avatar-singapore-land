@@ -1,27 +1,18 @@
 import { GoogleGenAI } from "@google/genai";
 import { NextResponse } from "next/server";
 
+export const dynamic = "force-dynamic";
+
 const PROJECT = process.env.GOOGLE_VERTEX_PROJECT;
 const LOCATION = process.env.GOOGLE_VERTEX_LOCATION || "us-central1";
 const WEB_DATASTORE_ID = process.env.VERTEX_AI_WEB_DATASTORE_ID;
 const PDF_DATASTORE_ID = process.env.VERTEX_AI_PDF_DATASTORE_ID;
-
-if (!PROJECT) console.warn("[chat] GOOGLE_VERTEX_PROJECT is not set.");
-if (!WEB_DATASTORE_ID) console.warn("[chat] VERTEX_AI_WEB_DATASTORE_ID is not set.");
-if (!PDF_DATASTORE_ID) console.warn("[chat] VERTEX_AI_PDF_DATASTORE_ID is not set.");
-
-const ai = new GoogleGenAI({ vertexai: true, project: PROJECT, location: LOCATION });
 
 const MODEL_NAME = "gemini-2.5-flash";
 
 function datastorePath(id: string) {
     return `projects/${PROJECT}/locations/global/collections/default_collection/dataStores/${id}`;
 }
-
-const groundingTools = [
-    ...(WEB_DATASTORE_ID ? [{ retrieval: { vertexAiSearch: { datastore: datastorePath(WEB_DATASTORE_ID) } } }] : []),
-    ...(PDF_DATASTORE_ID ? [{ retrieval: { vertexAiSearch: { datastore: datastorePath(PDF_DATASTORE_ID) } } }] : []),
-];
 
 const VALID_GESTURES = new Set(["idle", "nod", "shake", "tilt", "lookup", "excited"]);
 
@@ -50,6 +41,17 @@ When in doubt, use "idle".`;
 export async function POST(req: Request) {
     try {
         const { message, history } = await req.json();
+
+        if (!PROJECT) console.warn("[chat] GOOGLE_VERTEX_PROJECT is not set.");
+        if (!WEB_DATASTORE_ID) console.warn("[chat] VERTEX_AI_WEB_DATASTORE_ID is not set.");
+        if (!PDF_DATASTORE_ID) console.warn("[chat] VERTEX_AI_PDF_DATASTORE_ID is not set.");
+
+        const ai = new GoogleGenAI({ vertexai: true, project: PROJECT, location: LOCATION });
+
+        const groundingTools = [
+            ...(WEB_DATASTORE_ID ? [{ retrieval: { vertexAiSearch: { datastore: datastorePath(WEB_DATASTORE_ID) } } }] : []),
+            ...(PDF_DATASTORE_ID ? [{ retrieval: { vertexAiSearch: { datastore: datastorePath(PDF_DATASTORE_ID) } } }] : []),
+        ];
 
         if (!message) {
             return NextResponse.json({ error: "Message is required." }, { status: 400 });
