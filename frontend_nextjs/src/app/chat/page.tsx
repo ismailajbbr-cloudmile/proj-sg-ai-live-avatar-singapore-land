@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Avatar from "@/components/Avatar";
 import Chat from "@/components/Chat";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
+import { useIdleReset } from "@/hooks/useIdleReset";
 
 // Page Name: Chat (In-call)
 // Route: /chat
@@ -71,6 +72,7 @@ export default function ChatPage() {
   const [isPttPressed, setIsPttPressed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [lang, setLang] = useState("en-US");
+  const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
 
   // ── Lip sync state ────────────────────────────────────────────────────────
   const [visemeFrames, setVisemeFrames] = useState<VisemeFrame[]>([]);
@@ -87,6 +89,21 @@ export default function ChatPage() {
   const audioQueueRef = useRef<AudioSegment[]>([]);
   const isPlayingRef = useRef(false);
   const playSegmentRef = useRef<((seg: AudioSegment) => void) | null>(null);
+
+  // Fetch config for idle timeout
+  useEffect(() => {
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.session_idle_timeout_minutes === "number") {
+          setIdleTimeout(d.session_idle_timeout_minutes);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Kiosk idle reset — navigate back to lobby so next visitor gets a fresh session
+  useIdleReset(idleTimeout);
 
   useEffect(() => {
     const el = document.createElement("audio");

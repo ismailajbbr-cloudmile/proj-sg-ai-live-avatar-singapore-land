@@ -24,7 +24,19 @@ export default function LoginPage() {
 
             if (res.ok) {
                 // Successful login automatically sets the HTTP-only cookie.
-                // Redirect to the lobby.
+                // Check if user is admin and redirect accordingly.
+                try {
+                    const meRes = await fetch("/api/auth/me");
+                    if (meRes.ok) {
+                        const meData = await meRes.json();
+                        if (meData.is_admin === true) {
+                            router.push("/admin");
+                            return;
+                        }
+                    }
+                } catch {
+                    // If /me check fails, fall through to default redirect
+                }
                 router.push("/");
                 router.refresh(); // Ensure strict middleware recalculation
             } else {

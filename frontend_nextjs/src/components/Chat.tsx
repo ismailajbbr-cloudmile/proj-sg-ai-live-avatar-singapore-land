@@ -130,6 +130,7 @@ export default function Chat({
   const isPressingRef = useRef(false);
   const isRecordingRef = useRef(false);
   const messageIdRef = useRef(2);
+  const conversationIdRef = useRef<string | null>(null);
 
   // Sequential TTS queue — ensures sentences are spoken in order
   // even if TTS API responses arrive out of order
@@ -156,7 +157,7 @@ export default function Chat({
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
-        console.warn("[TTS] API error:", err.error ?? res.statusText);
+        console.warn("[TTS] API error:", err.detail ?? err.error ?? res.statusText);
         return;
       }
       const { audioBase64, mimeType, visemes } = await res.json();
@@ -206,10 +207,13 @@ export default function Chat({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history }),
+        body: JSON.stringify({ message: text, history, conversation_id: conversationIdRef.current }),
       });
 
-      if (!res.ok) throw new Error("Failed to fetch from chat API");
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || errData.error || `Chat API error (${res.status})`);
+      }
 
       const reader = res.body!.getReader();
       const decoder = new TextDecoder();
@@ -235,7 +239,9 @@ export default function Chat({
           try {
             const parsed = JSON.parse(line.slice(6));
 
-            if (parsed.type === "gesture") {
+            if (parsed.type === "conversation_id") {
+              conversationIdRef.current = parsed.value;
+            } else if (parsed.type === "gesture") {
               gesture = parsed.value;
             } else if (parsed.type === "chunk") {
               setIsThinking(false);

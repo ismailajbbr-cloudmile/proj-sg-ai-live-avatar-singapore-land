@@ -7,8 +7,11 @@ export function middleware(request: NextRequest) {
     const isAuthenticated = !!authToken;
     const isLoginPage = request.nextUrl.pathname.startsWith('/login');
 
-    // Protect the root lobby '/' and the '/chat' routes
-    const isProtectedRoute = request.nextUrl.pathname === '/' || request.nextUrl.pathname.startsWith('/chat');
+    // Protect the root lobby '/', the '/chat' routes, and the '/admin' routes
+    const isProtectedRoute =
+        request.nextUrl.pathname === '/' ||
+        request.nextUrl.pathname.startsWith('/chat') ||
+        request.nextUrl.pathname.startsWith('/admin');
 
     if (isProtectedRoute && !isAuthenticated) {
         // Redirect unauthenticated users to the login page
@@ -25,5 +28,5 @@ export function middleware(request: NextRequest) {
 
 // See "Matching Paths" below to learn more
 export const config = {
-    matcher: ['/', '/chat', '/login'],
+    matcher: ['/', '/chat', '/chat/:path*', '/login', '/admin', '/admin/:path*'],
 };
