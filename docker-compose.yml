@@ -1,13 +1,57 @@
 services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: avatar
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: avatar_chatbot
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U avatar -d avatar_chatbot"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend_fastapi
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ./backend_fastapi/.env
+    environment:
+      DATABASE_URL: postgresql+asyncpg://avatar:${POSTGRES_PASSWORD}@postgres:5432/avatar_chatbot
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
+    volumes:
+      - ./frontend_nextjs/avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+    expose:
+      - "8000"
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
+
   frontend:
     build:
       context: ./frontend_nextjs
       dockerfile: Dockerfile
     restart: unless-stopped
+    depends_on:
+      - backend
     env_file:
       - ./frontend_nextjs/.env.local
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
+      NEXT_PUBLIC_BACKEND_URL: http://backend:8000
     volumes:
       - ./frontend_nextjs/avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
     dns:
@@ -15,3 +59,6 @@ services:
       - 8.8.4.4
     ports:
       - "3000:3000"
+
+volumes:
+  postgres_data:

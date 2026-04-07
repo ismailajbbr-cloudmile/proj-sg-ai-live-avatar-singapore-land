@@ -2,6 +2,8 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
+import { useIdleLogout } from "@/hooks/useIdleLogout";
 
 // Page Name: Lobby
 // Route: /
@@ -9,10 +11,6 @@ import { useRouter } from "next/navigation";
 
 const AVATAR_NAME = "Marina Square AI Concierge";
 
-const LANGUAGE_OPTIONS = [
-  { code: "en-US", label: "English", flag: "🇺🇸" },
-  { code: "zh-CN", label: "中文 (简体)", flag: "🇨🇳" },
-];
 
 function SingaporeLandLogo() {
   return (
@@ -38,11 +36,33 @@ function SingaporeLandLogo() {
 
 export default function LobbyPage() {
   const router = useRouter();
-  const [langIndex, setLangIndex] = useState(0);
   const [isStarting, setIsStarting] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
-  const [showLangMenu, setShowLangMenu] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  // Fetch user info and config on mount
+  useEffect(() => {
+    fetch("/api/auth/me")
+      .then((r) => r.json())
+      .then((d) => {
+        if (d.is_admin === true) setIsAdmin(true);
+      })
+      .catch(() => {});
+
+    fetch("/api/config")
+      .then((r) => r.json())
+      .then((d) => {
+        if (typeof d.session_idle_timeout_minutes === "number") {
+          setIdleTimeout(d.session_idle_timeout_minutes);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  // Auto-logout on idle
+  useIdleLogout(idleTimeout);
 
   // Cleanup stream if user navigates away before entering
   useEffect(() => {
@@ -60,12 +80,12 @@ export default function LobbyPage() {
         video: true,
       });
       streamRef.current = stream;
-      sessionStorage.setItem("selectedLang", LANGUAGE_OPTIONS[langIndex].code);
+      sessionStorage.setItem("selectedLang", "en-US");
       router.push("/chat");
-    } catch (err: any) {
-      console.warn("Media permission error:", err.message);
+    } catch (err: unknown) {
+      console.warn("Media permission error:", err instanceof Error ? err.message : err);
       setPermError("Camera/Mic access denied. Continuing with text only...");
-      sessionStorage.setItem("selectedLang", LANGUAGE_OPTIONS[langIndex].code);
+      sessionStorage.setItem("selectedLang", "en-US");
       setTimeout(() => router.push("/chat"), 1800);
     }
   };
@@ -76,8 +96,18 @@ export default function LobbyPage() {
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 right-0 h-20 bg-white shadow-sm flex items-center justify-between px-8 z-10 w-full">
         <img src="/logo-marinasquare.png" alt="Marina Square" className="h-12 object-contain" />
-        <div className="text-[#0a2240] font-medium tracking-wide">
-          AI Concierge Kiosk
+        <div className="flex items-center gap-4">
+          {isAdmin && (
+            <Link
+              href="/admin"
+              className="text-sm font-medium text-[#0a2240] border border-[#0a2240]/20 rounded-full px-4 py-2 hover:bg-[#0a2240] hover:text-white transition-colors"
+            >
+              Admin Panel
+            </Link>
+          )}
+          <div className="text-[#0a2240] font-medium tracking-wide">
+            AI Concierge Kiosk
+          </div>
         </div>
       </div>
 
@@ -107,43 +137,8 @@ export default function LobbyPage() {
           </p>
         )}
 
-        {/* Bottom controls: language selector + tap to start */}
-        <div className="mt-8 mb-4 flex items-center gap-4 bg-white p-3 rounded-full shadow-lg border border-gray-100">
-
-          {/* Language selector */}
-          <div className="relative">
-            <button
-              onClick={() => setShowLangMenu((p) => !p)}
-              className="flex items-center gap-2 rounded-full px-6 py-3.5 text-sm font-semibold text-[#0a2240] hover:bg-gray-50 transition"
-            >
-              <span className="text-xl">{LANGUAGE_OPTIONS[langIndex].flag}</span>
-              {LANGUAGE_OPTIONS[langIndex].code.split('-')[0].toUpperCase()}
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <path d="M6 9l6 6 6-6" />
-              </svg>
-            </button>
-            {showLangMenu && (
-              <div className="absolute bottom-full mb-3 left-0 rounded-xl p-2 shadow-xl shadow-black/10 w-56 bg-white border border-gray-100 z-50">
-                {LANGUAGE_OPTIONS.map((lang, i) => (
-                  <button
-                    key={lang.code}
-                    onClick={() => { setLangIndex(i); setShowLangMenu(false); }}
-                    className="flex w-full items-center gap-3 rounded-lg px-4 py-3 font-medium text-[#0a2240] hover:bg-gray-50 transition"
-                  >
-                    <span className="text-xl">{lang.flag}</span>
-                    {lang.label}
-                    {i === langIndex && (
-                      <svg className="ml-auto" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#2323a8" strokeWidth="3">
-                        <path d="M20 6L9 17l-5-5" />
-                      </svg>
-                    )}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Start button */}
+        {/* Bottom controls */}
+        <div className="mt-8 mb-4 flex items-center bg-white p-3 rounded-full shadow-lg border border-gray-100">
           <button
             onClick={handleStartChat}
             disabled={isStarting}
