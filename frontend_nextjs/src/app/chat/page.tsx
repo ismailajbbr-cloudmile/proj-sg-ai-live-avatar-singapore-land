@@ -6,6 +6,7 @@ import Avatar from "@/components/Avatar";
 import Chat from "@/components/Chat";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 import { useIdleReset } from "@/hooks/useIdleReset";
+import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
 
 // Page Name: Chat (In-call)
 // Route: /chat
@@ -104,6 +105,12 @@ export default function ChatPage() {
 
   // Kiosk idle reset — navigate back to lobby so next visitor gets a fresh session
   useIdleReset(idleTimeout);
+
+  useEffect(() => {
+    if (!sessionStorage.getItem(KIOSK_CHAT_ENTRY_KEY)) {
+      router.replace("/");
+    }
+  }, [router]);
 
   useEffect(() => {
     const el = document.createElement("audio");

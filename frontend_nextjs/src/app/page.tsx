@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { useIdleLogout } from "@/hooks/useIdleLogout";
+import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
 
 // Page Name: Lobby
 // Route: /
@@ -42,12 +43,22 @@ export default function LobbyPage() {
   const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
+  useEffect(() => {
+    sessionStorage.removeItem(KIOSK_CHAT_ENTRY_KEY);
+  }, []);
+
   // Fetch user info and config on mount
   useEffect(() => {
     fetch("/api/auth/me")
-      .then((r) => r.json())
+      .then((r) => {
+        if (r.status === 401) {
+          router.replace("/login");
+          return null;
+        }
+        return r.json();
+      })
       .then((d) => {
-        if (d.is_admin === true) setIsAdmin(true);
+        if (d?.is_admin === true) setIsAdmin(true);
       })
       .catch(() => {});
 
@@ -59,7 +70,7 @@ export default function LobbyPage() {
         }
       })
       .catch(() => {});
-  }, []);
+  }, [router]);
 
   // Auto-logout on idle
   useIdleLogout(idleTimeout);
@@ -81,13 +92,21 @@ export default function LobbyPage() {
       });
       streamRef.current = stream;
       sessionStorage.setItem("selectedLang", "en-US");
+      sessionStorage.setItem(KIOSK_CHAT_ENTRY_KEY, "1");
       router.push("/chat");
     } catch (err: unknown) {
       console.warn("Media permission error:", err instanceof Error ? err.message : err);
       setPermError("Camera/Mic access denied. Continuing with text only...");
       sessionStorage.setItem("selectedLang", "en-US");
+      sessionStorage.setItem(KIOSK_CHAT_ENTRY_KEY, "1");
       setTimeout(() => router.push("/chat"), 1800);
     }
+  };
+
+  const handleLogout = async () => {
+    await fetch("/api/auth/logout", { method: "POST" });
+    router.push("/login");
+    router.refresh();
   };
 
   return (
@@ -105,6 +124,13 @@ export default function LobbyPage() {
               Admin Panel
             </Link>
           )}
+          <button
+            type="button"
+            onClick={() => void handleLogout()}
+            className="text-sm font-medium text-[#0a2240] border border-[#0a2240]/20 rounded-full px-4 py-2 hover:bg-[#0a2240] hover:text-white transition-colors"
+          >
+            Log out
+          </button>
           <div className="text-[#0a2240] font-medium tracking-wide">
             AI Concierge Kiosk
           </div>
