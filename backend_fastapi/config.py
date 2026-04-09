@@ -2,22 +2,20 @@ from pathlib import Path
 
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
-_ROOT_ENV = Path(__file__).parent.parent / ".env"       # avatar_chatbot/.env
-_BACKEND_ENV = Path(__file__).parent / ".env"            # backend_fastapi/.env
+_ROOT_ENV = Path(__file__).parent.parent / ".env"  # avatar_chatbot/.env (single source)
 
 
 class Settings(BaseSettings):
-    # Root env loaded first; backend env overrides any overlapping keys.
-    # Docker Compose also injects these as env vars (highest priority).
-    model_config = SettingsConfigDict(env_file=[_ROOT_ENV, _BACKEND_ENV], extra="ignore")
+    # Values from repo-root .env; process env / Docker Compose override file values.
+    model_config = SettingsConfigDict(env_file=[_ROOT_ENV], extra="ignore")
 
     database_url: str
     jwt_secret: str
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 60 * 24 * 7  # 7 days
 
-    admin_username: str = "admin"
-    admin_password: str = "password"
+    admin_username: str = ""
+    admin_password: str = ""
 
     google_vertex_project: str = ""
     google_vertex_location: str = "us-central1"

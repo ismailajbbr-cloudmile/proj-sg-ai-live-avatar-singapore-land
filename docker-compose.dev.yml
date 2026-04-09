@@ -26,10 +26,11 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - ./backend_fastapi/.env
+      - ./.env
     environment:
       DATABASE_URL: postgresql+asyncpg://avatar:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/avatar_chatbot
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
+      WATCHFILES_FORCE_POLLING: "1"
     volumes:
       - ./backend_fastapi:/app
       # Preserve the .venv installed at image build time — prevents source mount from overwriting it
