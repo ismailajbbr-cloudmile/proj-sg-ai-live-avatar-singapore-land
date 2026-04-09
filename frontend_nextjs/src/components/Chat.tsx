@@ -1,6 +1,8 @@
 "use client";
 
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
+import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
 import ReactMarkdown from "react-markdown";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 
@@ -114,6 +116,7 @@ export default function Chat({
   isPttHoveredOrPressed = false,
   onRecordingStatusChange,
 }: ChatProps) {
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
     {
       id: 1,
@@ -159,6 +162,11 @@ export default function Chat({
         body: JSON.stringify({ text, language: currentLanguage }),
       });
       if (!res.ok) {
+        if (res.status === 401) {
+          sessionStorage.removeItem(KIOSK_CHAT_ENTRY_KEY);
+          router.replace("/");
+          return null;
+        }
         const err = await res.json().catch(() => ({}));
         console.warn("[TTS] API error:", err.detail ?? err.error ?? res.statusText);
         return null;
@@ -172,7 +180,7 @@ export default function Chat({
       ttsActiveFetchesRef.current--;
       if (ttsActiveFetchesRef.current === 0) setIsTtsBusy(false);
     }
-  }, [currentLanguage]);
+  }, [currentLanguage, router]);
 
   // ── Drain resolved segments in original order ─────────────────────────────
   const drainTtsQueue = useCallback(async () => {
@@ -220,6 +228,12 @@ export default function Chat({
       });
 
       if (!res.ok) {
+        if (res.status === 401) {
+          sessionStorage.removeItem(KIOSK_CHAT_ENTRY_KEY);
+          setIsThinking(false);
+          router.replace("/");
+          return;
+        }
         const errData = await res.json().catch(() => ({}));
         throw new Error(errData.detail || errData.error || `Chat API error (${res.status})`);
       }

@@ -14,7 +14,9 @@ export function middleware(request: NextRequest) {
         request.nextUrl.pathname.startsWith('/admin');
 
     if (isProtectedRoute && !isAuthenticated) {
-        // Redirect unauthenticated users to the login page
+        if (request.nextUrl.pathname.startsWith('/chat')) {
+            return NextResponse.redirect(new URL('/', request.url));
+        }
         return NextResponse.redirect(new URL('/login', request.url));
     }
 
