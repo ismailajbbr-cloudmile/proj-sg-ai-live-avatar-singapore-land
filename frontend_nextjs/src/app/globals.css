@@ -115,6 +115,42 @@
   --sidebar-ring: oklch(0.556 0 0);
 }
 
+@property --toolbar-shine-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes toolbar-shine-rotate {
+  to {
+    --toolbar-shine-angle: 360deg;
+  }
+}
+
+.toolbar-thinking-shine {
+  --toolbar-shine-angle: 0deg;
+  padding: 2px;
+  border-radius: 2rem;
+  background: conic-gradient(
+    from var(--toolbar-shine-angle),
+    #2323a8,
+    #00b5ad,
+    #6366f1,
+    #00b5ad,
+    #2323a8
+  );
+  animation: toolbar-shine-rotate 2.5s linear infinite;
+}
+
+@keyframes shimmer {
+  0% {
+    transform: translateX(-100%) skewX(-12deg);
+  }
+  100% {
+    transform: translateX(200%) skewX(-12deg);
+  }
+}
+
 @layer base {
   * {
     @apply border-border outline-ring/50;
