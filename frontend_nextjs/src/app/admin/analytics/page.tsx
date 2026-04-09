@@ -116,6 +116,22 @@ export default function AnalyticsPage() {
         }
     };
 
+    const duration = (start: string, end?: string) => {
+        try {
+            const ms = new Date(end ?? start).getTime() - new Date(start).getTime();
+            if (ms < 1000) return "< 1s";
+            const secs = Math.floor(ms / 1000);
+            if (secs < 60) return `${secs}s`;
+            const mins = Math.floor(secs / 60);
+            if (mins < 60) return `${mins} min`;
+            const hrs = Math.floor(mins / 60);
+            const remMins = mins % 60;
+            return remMins > 0 ? `${hrs}h ${remMins}m` : `${hrs}h`;
+        } catch {
+            return "—";
+        }
+    };
+
     const formatLastRefreshed = (date: Date) => {
         return date.toLocaleTimeString("en-SG", { hour: "2-digit", minute: "2-digit", second: "2-digit" });
     };
@@ -189,6 +205,7 @@ export default function AnalyticsPage() {
                                             <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-3">Messages</th>
                                             <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-3">Created</th>
                                             <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-3">Last Updated</th>
+                                            <th className="text-left text-xs font-semibold text-gray-400 uppercase tracking-wider px-6 py-3">Duration</th>
                                         </tr>
                                     </thead>
                                     <tbody className="divide-y divide-gray-50">
@@ -215,6 +232,9 @@ export default function AnalyticsPage() {
                                                 </td>
                                                 <td className="px-6 py-3.5 text-sm text-gray-500 whitespace-nowrap" title={conv.updated_at ? formatDate(conv.updated_at) : undefined}>
                                                     {conv.updated_at ? timeAgo(conv.updated_at) : "—"}
+                                                </td>
+                                                <td className="px-6 py-3.5 text-sm text-gray-500 whitespace-nowrap">
+                                                    {conv.updated_at ? duration(conv.created_at, conv.updated_at) : "—"}
                                                 </td>
                                             </tr>
                                         ))}
