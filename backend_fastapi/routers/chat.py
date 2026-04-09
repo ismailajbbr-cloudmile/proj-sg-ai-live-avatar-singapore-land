@@ -128,8 +128,6 @@ async def chat(
                     for m in history
                 ]
 
-            is_first = len(gemini_history) == 0
-
             def sse(obj: dict) -> bytes:
                 return f"data: {json.dumps(obj)}\n\n".encode()
 
@@ -150,7 +148,7 @@ async def chat(
                         if newline_idx != -1:
                             gesture_line = line_buffer[:newline_idx].strip().lower()
                             gesture = gesture_line if gesture_line in VALID_GESTURES else "idle"
-                            yield sse({"type": "gesture", "value": "excited" if is_first else gesture})
+                            yield sse({"type": "gesture", "value": gesture})
                             gesture_emitted = True
                             rest = line_buffer[newline_idx + 1:]
                             if rest:
@@ -162,7 +160,7 @@ async def chat(
                         yield sse({"type": "chunk", "value": chunk_text})
 
                 if not gesture_emitted:
-                    yield sse({"type": "gesture", "value": "excited" if is_first else "idle"})
+                    yield sse({"type": "gesture", "value": "idle"})
                     if line_buffer:
                         collected_text += line_buffer
                         yield sse({"type": "chunk", "value": line_buffer})
