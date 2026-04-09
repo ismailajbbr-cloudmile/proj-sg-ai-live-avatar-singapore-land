@@ -33,7 +33,7 @@ services:
       DATABASE_URL: postgresql+asyncpg://avatar:${POSTGRES_PASSWORD}@postgres:5432/avatar_chatbot
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
     volumes:
-      - ./frontend_nextjs/avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+      - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
     expose:
       - "8000"
     dns:
@@ -53,7 +53,7 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
       NEXT_PUBLIC_BACKEND_URL: http://backend:8000
     volumes:
-      - ./frontend_nextjs/avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+      - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
     dns:
       - 8.8.8.8
       - 8.8.4.4

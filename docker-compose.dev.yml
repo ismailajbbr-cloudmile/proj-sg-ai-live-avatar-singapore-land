@@ -35,7 +35,7 @@ services:
       - ./backend_fastapi:/app
       # Preserve the .venv installed at image build time — prevents source mount from overwriting it
       - /app/.venv
-      - ./frontend_nextjs/avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+      - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
     ports:
       - "8000:8000"
     dns:
@@ -57,7 +57,7 @@ services:
     volumes:
       - ./frontend_nextjs:/app
       - /app/node_modules
-      - ./frontend_nextjs/avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+      - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
     dns:
       - 8.8.8.8
       - 8.8.4.4
