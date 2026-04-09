@@ -25,6 +25,8 @@ interface ChatProps {
   avatarName?: string;
   isPttHoveredOrPressed?: boolean;
   onRecordingStatusChange?: (isRecording: boolean) => void;
+  /** Notifies parent when the chat API is waiting for a streamed response */
+  onThinkingChange?: (thinking: boolean) => void;
 }
 
 declare global {
@@ -115,6 +117,7 @@ export default function Chat({
   avatarName = "AI Concierge",
   isPttHoveredOrPressed = false,
   onRecordingStatusChange,
+  onThinkingChange,
 }: ChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
@@ -150,6 +153,10 @@ export default function Chat({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
+
+  useEffect(() => {
+    onThinkingChange?.(isThinking);
+  }, [isThinking, onThinkingChange]);
 
   // ── TTS fetch (fires immediately, returns a promise) ─────────────────────
   const fetchTtsSegment = useCallback(async (text: string, gesture: AvatarGesture): Promise<TtsSegment | null> => {

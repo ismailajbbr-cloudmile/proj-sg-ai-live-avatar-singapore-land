@@ -257,3 +257,5 @@ frontend_nextjs/*.json
 
 .claude
 CLAUDE.md
+
+.idea
