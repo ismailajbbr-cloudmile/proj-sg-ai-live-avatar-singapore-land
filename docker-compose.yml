@@ -48,7 +48,7 @@ services:
     depends_on:
       - backend
     env_file:
-      - ./frontend_nextjs/.env.local
+      - ./.env
     environment:
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
       NEXT_PUBLIC_BACKEND_URL: http://backend:8000
