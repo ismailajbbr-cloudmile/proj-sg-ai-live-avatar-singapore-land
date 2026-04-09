@@ -11,6 +11,8 @@ interface Message {
   timestamp: Date;
 }
 
+type TtsSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
+
 interface ChatProps {
   /** Called whenever the bot has a new spoken sentence ready */
   onBotSpeech?: (audioBase64: string, mimeType: string, visemes: VisemeFrame[], gesture: AvatarGesture) => void;
@@ -132,10 +134,11 @@ export default function Chat({
   const messageIdRef = useRef(2);
   const conversationIdRef = useRef<string | null>(null);
 
-  // Sequential TTS queue — ensures sentences are spoken in order
-  // even if TTS API responses arrive out of order
-  const ttsQueueRef = useRef<Array<{ text: string; gesture: AvatarGesture }>>([]);
-  const ttsProcessingRef = useRef(false);
+  // Parallel TTS fetch queue — fires fetches immediately as sentences arrive,
+  // but drains results in original order so audio always plays in sequence.
+  const pendingTtsRef = useRef<Promise<TtsSegment | null>[]>([]);
+  const ttsDrainRunningRef = useRef(false);
+  const ttsActiveFetchesRef = useRef(0);
 
   const availableLanguages = getAvailableLanguages(language);
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
@@ -145,9 +148,9 @@ export default function Chat({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, isThinking]);
 
-  // ── TTS via Next.js API ───────────────────────────────────────────────────
-  const speakText = useCallback(async (text: string, gesture: AvatarGesture = "idle") => {
-    if (!onBotSpeech) return;
+  // ── TTS fetch (fires immediately, returns a promise) ─────────────────────
+  const fetchTtsSegment = useCallback(async (text: string, gesture: AvatarGesture): Promise<TtsSegment | null> => {
+    ttsActiveFetchesRef.current++;
     setIsTtsBusy(true);
     try {
       const res = await fetch("/api/tts", {
@@ -158,34 +161,38 @@ export default function Chat({
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         console.warn("[TTS] API error:", err.detail ?? err.error ?? res.statusText);
-        return;
+        return null;
       }
       const { audioBase64, mimeType, visemes } = await res.json();
-      onBotSpeech(audioBase64, mimeType, visemes, gesture);
+      return { audioBase64, mimeType, visemes, gesture };
     } catch (err) {
       console.error("[TTS] fetch failed:", err);
+      return null;
     } finally {
-      setIsTtsBusy(false);
+      ttsActiveFetchesRef.current--;
+      if (ttsActiveFetchesRef.current === 0) setIsTtsBusy(false);
     }
-  }, [onBotSpeech, currentLanguage]);
+  }, [currentLanguage]);
 
-  // ── Sequential TTS processor ─────────────────────────────────────────────
-  // Drains ttsQueueRef one item at a time, awaiting each speakText call so
-  // that onBotSpeech is always invoked in sentence order, never out of order.
-  const processTtsQueue = useCallback(async () => {
-    if (ttsProcessingRef.current) return;
-    ttsProcessingRef.current = true;
-    while (ttsQueueRef.current.length > 0) {
-      const item = ttsQueueRef.current.shift()!;
-      await speakText(item.text, item.gesture);
+  // ── Drain resolved segments in original order ─────────────────────────────
+  const drainTtsQueue = useCallback(async () => {
+    if (ttsDrainRunningRef.current) return;
+    ttsDrainRunningRef.current = true;
+    while (pendingTtsRef.current.length > 0) {
+      const seg = await pendingTtsRef.current[0];
+      pendingTtsRef.current.shift();
+      if (seg && onBotSpeech) {
+        onBotSpeech(seg.audioBase64, seg.mimeType, seg.visemes, seg.gesture);
+      }
     }
-    ttsProcessingRef.current = false;
-  }, [speakText]);
+    ttsDrainRunningRef.current = false;
+  }, [onBotSpeech]);
 
   const enqueueTts = useCallback((text: string, gesture: AvatarGesture) => {
-    ttsQueueRef.current.push({ text, gesture });
-    processTtsQueue();
-  }, [processTtsQueue]);
+    // Fire fetch immediately — parallel with any already in-flight fetches
+    pendingTtsRef.current.push(fetchTtsSegment(text, gesture));
+    drainTtsQueue();
+  }, [fetchTtsSegment, drainTtsQueue]);
 
   // ── Chat logic ────────────────────────────────────────────────────────────
   const handleSend = async (textToSend?: string) => {
@@ -197,8 +204,10 @@ export default function Chat({
     if (!textToSend) setInput("");
 
     onClearSpeech?.();
-    ttsQueueRef.current = [];
-    ttsProcessingRef.current = false;
+    pendingTtsRef.current = [];
+    ttsDrainRunningRef.current = false;
+    ttsActiveFetchesRef.current = 0;
+    setIsTtsBusy(false);
     setIsThinking(true);
 
     const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
