@@ -28,7 +28,7 @@ services:
       postgres:
         condition: service_healthy
     env_file:
-      - ./backend_fastapi/.env
+      - ./.env
     environment:
       DATABASE_URL: postgresql+asyncpg://avatar:${POSTGRES_PASSWORD}@postgres:5432/avatar_chatbot
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
