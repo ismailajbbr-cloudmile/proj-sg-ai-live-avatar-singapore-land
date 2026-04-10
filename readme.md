@@ -4,8 +4,6 @@
 
 - Docker + Docker Compose
 - GCP service account key JSON file (for Vertex AI + TTS)
-- ....
-
 ---
 
 ## 1. Environment File
