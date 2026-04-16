@@ -60,9 +60,9 @@ jobs:
           gcloud compute scp --recurse . ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }} --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
 
           # 8. Stop existing containers, Build (No Cache), and Start
-          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.dev.yml down || true"
-          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.dev.yml build --no-cache"
-          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.dev.yml up -d"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml down || true"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml build --no-cache"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml up -d"
 
           # 9. Clean up old images
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo docker image prune -f"
