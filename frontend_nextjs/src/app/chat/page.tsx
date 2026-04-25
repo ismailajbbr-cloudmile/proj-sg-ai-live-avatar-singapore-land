@@ -6,6 +6,8 @@ import Avatar from "@/components/Avatar";
 import Chat from "@/components/Chat";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 import { useIdleReset } from "@/hooks/useIdleReset";
+import { IdleWarningModal } from "@/components/IdleWarningModal";
+import { IdleIndicator } from "@/components/IdleIndicator";
 import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
 
 // Page Name: Chat (In-call)
@@ -75,6 +77,8 @@ export default function ChatPage() {
   const [isRecording, setIsRecording] = useState(false);
   const [lang, setLang] = useState("en-US");
   const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
+  const [idleWarningOpen, setIdleWarningOpen] = useState(false);
+  const [warningCountdown, setWarningCountdown] = useState(30);
 
   // ── Lip sync state ────────────────────────────────────────────────────────
   const [visemeFrames, setVisemeFrames] = useState<VisemeFrame[]>([]);
@@ -105,7 +109,22 @@ export default function ChatPage() {
   }, []);
 
   // Kiosk idle reset — navigate back to lobby so next visitor gets a fresh session
-  useIdleReset(idleTimeout);
+  const { isActive: idleActive, isInWarning, remainingSecs, totalIdleSecs, manualResume } = useIdleReset(idleTimeout, {
+    warningSeconds: 30,
+    onWarning: () => {
+      setWarningCountdown(30);
+      setIdleWarningOpen(true);
+    },
+  });
+
+  // Countdown ticker while warning modal is open
+  useEffect(() => {
+    if (!idleWarningOpen) return;
+    const interval = setInterval(() => {
+      setWarningCountdown((n) => Math.max(0, n - 1));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [idleWarningOpen]);
 
   useEffect(() => {
     if (!sessionStorage.getItem(KIOSK_CHAT_ENTRY_KEY)) {
@@ -278,6 +297,12 @@ export default function ChatPage() {
             <div className="w-px h-5 bg-gray-200 ml-1"></div>
             <span className="text-sm font-semibold text-[#64748b]">AI Concierge</span>
           </div>
+          <IdleIndicator
+            isActive={idleActive}
+            isInWarning={isInWarning}
+            remainingSecs={remainingSecs}
+            totalIdleSecs={totalIdleSecs}
+          />
         </div>
 
         {/* ── Bottom Toolbar Center ── */}
@@ -382,6 +407,12 @@ export default function ChatPage() {
         </div>
       </div>
 
+      <IdleWarningModal
+        open={idleWarningOpen}
+        countdownSeconds={warningCountdown}
+        onStayActive={() => { setIdleWarningOpen(false); manualResume(); }}
+        onNewSession={() => router.push("/")}
+      />
     </div>
   );
 }
