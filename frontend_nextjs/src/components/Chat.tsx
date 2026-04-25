@@ -11,6 +11,7 @@ interface Message {
   text: string;
   sender: "user" | "bot";
   timestamp: Date;
+  showQr?: boolean;
 }
 
 type TtsSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
@@ -75,7 +76,10 @@ function cleanTextForTTS(text: string): string {
   // Remove headings (#)
   cleaned = cleaned.replace(/^#+\s+/gm, "");
 
-  // 2. Expand common abbreviations
+  // 2. Strip internal markers
+  cleaned = cleaned.replace(/\[SHOW_QR\]/gi, "");
+
+  // 3. Expand common abbreviations
   cleaned = cleaned.replace(/\be\.g\./gi, "for example");
   cleaned = cleaned.replace(/\bi\.e\./gi, "that is");
   cleaned = cleaned.replace(/\betc\./gi, "and so on");
@@ -254,6 +258,7 @@ export default function Chat({
       let messageAdded = false;
       let sseBuffer = "";
       let sentenceBuffer = "";
+      let showQrDetected = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -275,8 +280,11 @@ export default function Chat({
               gesture = parsed.value;
             } else if (parsed.type === "chunk") {
               setIsThinking(false);
-              fullText += parsed.value;
-              sentenceBuffer += parsed.value;
+              // Strip QR marker before display and TTS
+              const chunkVal = parsed.value.replace(/\[SHOW_QR\]/gi, "");
+              if (chunkVal !== parsed.value) showQrDetected = true;
+              fullText += chunkVal;
+              sentenceBuffer += chunkVal;
 
               if (!messageAdded) {
                 setMessages((prev) => [...prev, { id: botMessageId, text: fullText, sender: "bot", timestamp: new Date() }]);
@@ -300,6 +308,17 @@ export default function Chat({
               // Flush any remaining text that didn't end with punctuation
               const remaining = sentenceBuffer.trim();
               if (remaining) enqueueTts(cleanTextForTTS(remaining), gesture);
+              // Show QR and speak the prompt when marker was detected
+              if (showQrDetected) {
+                setMessages((prev) =>
+                  prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
+                );
+                enqueueTts("You can scan this QR code for detailed directions and information.", gesture);
+              }
+            } else if (parsed.type === "show_qr") {
+              setMessages((prev) =>
+                prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
+              );
             } else if (parsed.type === "error") {
               throw new Error(parsed.value);
             }
@@ -443,12 +462,22 @@ export default function Chat({
                           a: ({ node, ...props }) => <a className="text-[#0a2240] font-semibold hover:underline" {...props} />
                         }}
                       >
-                        {message.text}
+                        {message.text.replace(/\[SHOW_QR\]/g, "").trim()}
                       </ReactMarkdown>
                     </div>
                     <p className="mt-1.5 ml-1 text-[11px] font-medium text-gray-400" suppressHydrationWarning>
                       {formatTime(message.timestamp)}
                     </p>
+                    {message.showQr && (
+                      <div className="mt-3 ml-1">
+                        <p className="text-[11px] text-gray-500 mb-1.5">You can scan this QR for detailed information:</p>
+                        <img
+                          src="/qrcode.svg"
+                          alt="Location QR Code"
+                          className="w-32 h-32 rounded-lg border border-gray-200 bg-white p-1"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (

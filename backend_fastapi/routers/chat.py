@@ -165,6 +165,10 @@ async def chat(
                         collected_text += line_buffer
                         yield sse({"type": "chunk", "value": line_buffer})
 
+                if "[SHOW_QR]" in collected_text:
+                    yield sse({"type": "show_qr", "value": True})
+                    collected_text = collected_text.replace("[SHOW_QR]", "").strip()
+
                 yield sse({"type": "done"})
 
             except Exception as e:
