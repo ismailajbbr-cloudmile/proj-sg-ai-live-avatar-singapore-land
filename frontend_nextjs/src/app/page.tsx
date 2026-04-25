@@ -3,7 +3,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { useIdleLogout } from "@/hooks/useIdleLogout";
 import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
 
 // Page Name: Lobby
@@ -40,7 +39,6 @@ export default function LobbyPage() {
   const [isStarting, setIsStarting] = useState(false);
   const [permError, setPermError] = useState<string | null>(null);
   const [isAdmin, setIsAdmin] = useState(false);
-  const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
 
   useEffect(() => {
@@ -62,18 +60,7 @@ export default function LobbyPage() {
       })
       .catch(() => {});
 
-    fetch("/api/config")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.session_idle_timeout_minutes === "number") {
-          setIdleTimeout(d.session_idle_timeout_minutes);
-        }
-      })
-      .catch(() => {});
   }, [router]);
-
-  // Auto-logout on idle
-  useIdleLogout(idleTimeout);
 
   // Cleanup stream if user navigates away before entering
   useEffect(() => {
