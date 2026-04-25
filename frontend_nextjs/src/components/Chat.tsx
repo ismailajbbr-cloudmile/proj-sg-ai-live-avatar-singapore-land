@@ -28,6 +28,8 @@ interface ChatProps {
   onRecordingStatusChange?: (isRecording: boolean) => void;
   /** Notifies parent when the chat API is waiting for a streamed response */
   onThinkingChange?: (thinking: boolean) => void;
+  /** Ref the parent populates; Chat writes a handler here to receive speech-ended events */
+  speechEndCallbackRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 declare global {
@@ -122,6 +124,7 @@ export default function Chat({
   isPttHoveredOrPressed = false,
   onRecordingStatusChange,
   onThinkingChange,
+  speechEndCallbackRef,
 }: ChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
@@ -150,6 +153,11 @@ export default function Chat({
   const ttsDrainRunningRef = useRef(false);
   const ttsActiveFetchesRef = useRef(0);
 
+  // Message queue — holds messages submitted while avatar is speaking
+  const pendingMessageQueueRef = useRef<string[]>([]);
+  const [queuedMessageCount, setQueuedMessageCount] = useState(0);
+  const isAvatarSpeakingRef = useRef(false);
+
   const availableLanguages = getAvailableLanguages(language);
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
   const currentLanguage = availableLanguages[currentLanguageIndex];
@@ -161,6 +169,20 @@ export default function Chat({
   useEffect(() => {
     onThinkingChange?.(isThinking);
   }, [isThinking, onThinkingChange]);
+
+  // ── Speech-ended callback — registered with parent so it can notify us ───
+  // No dependency array: always captures the latest handleSend without stale closure.
+  useEffect(() => {
+    if (!speechEndCallbackRef) return;
+    speechEndCallbackRef.current = () => {
+      isAvatarSpeakingRef.current = false;
+      const next = pendingMessageQueueRef.current.shift();
+      if (next !== undefined) {
+        setQueuedMessageCount(pendingMessageQueueRef.current.length);
+        handleSend(next);
+      }
+    };
+  });
 
   // ── TTS fetch (fires immediately, returns a promise) ─────────────────────
   const fetchTtsSegment = useCallback(async (text: string, gesture: AvatarGesture): Promise<TtsSegment | null> => {
@@ -218,6 +240,14 @@ export default function Chat({
     const text = textToSend || input;
     if (!text.trim() || isThinking) return;
 
+    // If avatar is currently speaking, queue the message and wait
+    if (isAvatarSpeakingRef.current) {
+      pendingMessageQueueRef.current.push(text);
+      setQueuedMessageCount(pendingMessageQueueRef.current.length);
+      if (!textToSend) setInput("");
+      return;
+    }
+
     const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
     setMessages((prev) => [...prev, newUserMessage]);
     if (!textToSend) setInput("");
@@ -228,6 +258,7 @@ export default function Chat({
     ttsActiveFetchesRef.current = 0;
     setIsTtsBusy(false);
     setIsThinking(true);
+    isAvatarSpeakingRef.current = true;
 
     const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
 
@@ -424,6 +455,11 @@ export default function Chat({
       <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shadow-sm z-10">
         <span className="text-base font-bold text-[#0a2240]">Conversation</span>
         <div className="flex items-center gap-3">
+          {queuedMessageCount > 0 && (
+            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
+              {queuedMessageCount} message{queuedMessageCount > 1 ? "s" : ""} waiting
+            </span>
+          )}
           {isTtsBusy && (
             <span className="text-xs text-gray-400 animate-pulse">Speaking…</span>
           )}
