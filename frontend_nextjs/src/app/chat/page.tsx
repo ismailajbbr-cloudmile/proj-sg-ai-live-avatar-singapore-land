@@ -96,6 +96,9 @@ export default function ChatPage() {
   const isPlayingRef = useRef(false);
   const playSegmentRef = useRef<((seg: AudioSegment) => void) | null>(null);
 
+  // Callback ref: Chat.tsx writes a handler here; we call it when speech fully ends
+  const chatSpeechEndCallbackRef = useRef<(() => void) | null>(null);
+
   // Fetch config for idle timeout
   useEffect(() => {
     fetch("/api/config")
@@ -235,6 +238,7 @@ export default function ChatPage() {
       } else {
         isPlayingRef.current = false;
         setGesture("idle");
+        chatSpeechEndCallbackRef.current?.();
       }
     };
 
@@ -258,6 +262,7 @@ export default function ChatPage() {
     setPlayheadMs(0);
     setVisemeFrames([]);
     setGesture("idle");
+    chatSpeechEndCallbackRef.current?.();
   }, [stopRaf]);
 
   // ── Called by Chat.tsx for each TTS sentence segment ────────────────────
@@ -403,6 +408,7 @@ export default function ChatPage() {
             isPttHoveredOrPressed={isPttPressed}
             onRecordingStatusChange={(recording) => setIsRecording(recording)}
             onThinkingChange={setIsAiThinking}
+            speechEndCallbackRef={chatSpeechEndCallbackRef}
           />
         </div>
       </div>
