@@ -1,9 +1,10 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, Suspense } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
+import Avatar from "@/components/Avatar";
 
 // Page Name: Lobby
 // Route: /
@@ -128,19 +129,10 @@ export default function LobbyPage() {
       <div className="relative w-full max-w-5xl flex flex-col items-center justify-center pt-24 pb-8 px-4 h-full">
 
         {/* Avatar preview card */}
-        <div className="relative w-full overflow-hidden rounded-2xl shadow-2xl shadow-black/5 bg-white border border-gray-100 flex-1 max-h-[70vh] flex flex-col">
-          <div className="absolute inset-0 flex items-center justify-center bg-gradient-to-b from-[#f0f4f8] to-white">
-            <div className="text-center">
-              <div
-                className="mx-auto mb-6 flex items-center justify-center rounded-full bg-[#0a2240] text-white shadow-lg"
-                style={{ width: 120, height: 120, fontSize: 60 }}
-              >
-                👤
-              </div>
-              <h1 className="text-3xl font-bold text-[#0a2240] mb-2">{AVATAR_NAME}</h1>
-              <p className="text-[#64748b] text-lg">Tap to start a conversation</p>
-            </div>
-          </div>
+        <div className="relative w-full overflow-hidden rounded-2xl shadow-2xl shadow-black/5 bg-white border border-gray-100 flex-1 max-h-[70vh]">
+          <Suspense fallback={null}>
+            <Avatar />
+          </Suspense>
         </div>
 
         {/* Error hint */}
