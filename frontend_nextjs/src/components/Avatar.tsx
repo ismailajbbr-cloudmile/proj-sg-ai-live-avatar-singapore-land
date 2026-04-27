@@ -6,7 +6,7 @@ import { Suspense, useRef, useEffect } from "react";
 import { Group } from "three";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 
-useGLTF.preload("/avatar/avatar-L7oSo3s2Ds6JI38eWEjN.glb");
+useGLTF.preload("/avatar/avatar-D4qhng88kEyArdzPMfmu.glb");
 
 // ─── Camera / Display Constants ────────────────────────────────────────────
 // Avatar faces +Z. Camera on the +Z side looks at the face.
@@ -261,7 +261,7 @@ function AvatarModel({
   const BLINK_INTERVAL = 10,
     BLINK_DURATION = 0.2;
 
-  const { scene, nodes } = useGLTF("/avatar/avatar-L7oSo3s2Ds6JI38eWEjN.glb");
+  const { scene, nodes } = useGLTF("/avatar/avatar-D4qhng88kEyArdzPMfmu.glb");
   const groupRef = useRef<Group>(null);
   const headRef = useRef<any>(null);
   const neckRef = useRef<any>(null);
