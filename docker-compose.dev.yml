@@ -2,9 +2,9 @@ services:
   postgres:
     image: postgres:16-alpine
     environment:
-      POSTGRES_USER: avatar
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-devpassword}
-      POSTGRES_DB: avatar_chatbot
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data_dev:/var/lib/postgresql/data
     ports:
@@ -13,7 +13,7 @@ services:
       - 8.8.8.8
       - 8.8.4.4
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U avatar -d avatar_chatbot"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -28,7 +28,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://avatar:${POSTGRES_PASSWORD:-devpassword}@postgres:5432/avatar_chatbot
+      DATABASE_URL: ${DATABASE_URL_DOCKER}
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
       WATCHFILES_FORCE_POLLING: "1"
     volumes:

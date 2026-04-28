@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     google_application_credentials: str = "/app/credentials/gcp-key.json"
     next_public_origin: str = "http://localhost:3000"
 
-    session_idle_timeout_minutes: int = 5
+    session_idle_timeout_minutes: int = 1
 
     tts_model: str = "gemini-2.5-flash-tts"
     tts_voice_name: str = "Achernar"

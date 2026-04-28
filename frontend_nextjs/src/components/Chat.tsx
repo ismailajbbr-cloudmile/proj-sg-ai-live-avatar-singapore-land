@@ -11,6 +11,7 @@ interface Message {
   text: string;
   sender: "user" | "bot";
   timestamp: Date;
+  showQr?: boolean;
 }
 
 type TtsSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
@@ -27,6 +28,8 @@ interface ChatProps {
   onRecordingStatusChange?: (isRecording: boolean) => void;
   /** Notifies parent when the chat API is waiting for a streamed response */
   onThinkingChange?: (thinking: boolean) => void;
+  /** Ref the parent populates; Chat writes a handler here to receive speech-ended events */
+  speechEndCallbackRef?: React.MutableRefObject<(() => void) | null>;
 }
 
 declare global {
@@ -75,7 +78,10 @@ function cleanTextForTTS(text: string): string {
   // Remove headings (#)
   cleaned = cleaned.replace(/^#+\s+/gm, "");
 
-  // 2. Expand common abbreviations
+  // 2. Strip internal markers
+  cleaned = cleaned.replace(/\[SHOW_QR\]/gi, "");
+
+  // 3. Expand common abbreviations
   cleaned = cleaned.replace(/\be\.g\./gi, "for example");
   cleaned = cleaned.replace(/\bi\.e\./gi, "that is");
   cleaned = cleaned.replace(/\betc\./gi, "and so on");
@@ -118,6 +124,7 @@ export default function Chat({
   isPttHoveredOrPressed = false,
   onRecordingStatusChange,
   onThinkingChange,
+  speechEndCallbackRef,
 }: ChatProps) {
   const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([
@@ -146,6 +153,11 @@ export default function Chat({
   const ttsDrainRunningRef = useRef(false);
   const ttsActiveFetchesRef = useRef(0);
 
+  // Message queue — holds messages submitted while avatar is speaking
+  const pendingMessageQueueRef = useRef<string[]>([]);
+  const [queuedMessageCount, setQueuedMessageCount] = useState(0);
+  const isAvatarSpeakingRef = useRef(false);
+
   const availableLanguages = getAvailableLanguages(language);
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
   const currentLanguage = availableLanguages[currentLanguageIndex];
@@ -157,6 +169,20 @@ export default function Chat({
   useEffect(() => {
     onThinkingChange?.(isThinking);
   }, [isThinking, onThinkingChange]);
+
+  // ── Speech-ended callback — registered with parent so it can notify us ───
+  // No dependency array: always captures the latest handleSend without stale closure.
+  useEffect(() => {
+    if (!speechEndCallbackRef) return;
+    speechEndCallbackRef.current = () => {
+      isAvatarSpeakingRef.current = false;
+      const next = pendingMessageQueueRef.current.shift();
+      if (next !== undefined) {
+        setQueuedMessageCount(pendingMessageQueueRef.current.length);
+        handleSend(next);
+      }
+    };
+  });
 
   // ── TTS fetch (fires immediately, returns a promise) ─────────────────────
   const fetchTtsSegment = useCallback(async (text: string, gesture: AvatarGesture): Promise<TtsSegment | null> => {
@@ -214,6 +240,14 @@ export default function Chat({
     const text = textToSend || input;
     if (!text.trim() || isThinking) return;
 
+    // If avatar is currently speaking, queue the message and wait
+    if (isAvatarSpeakingRef.current) {
+      pendingMessageQueueRef.current.push(text);
+      setQueuedMessageCount(pendingMessageQueueRef.current.length);
+      if (!textToSend) setInput("");
+      return;
+    }
+
     const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
     setMessages((prev) => [...prev, newUserMessage]);
     if (!textToSend) setInput("");
@@ -224,6 +258,7 @@ export default function Chat({
     ttsActiveFetchesRef.current = 0;
     setIsTtsBusy(false);
     setIsThinking(true);
+    isAvatarSpeakingRef.current = true;
 
     const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
 
@@ -254,6 +289,7 @@ export default function Chat({
       let messageAdded = false;
       let sseBuffer = "";
       let sentenceBuffer = "";
+      let showQrDetected = false;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -275,8 +311,11 @@ export default function Chat({
               gesture = parsed.value;
             } else if (parsed.type === "chunk") {
               setIsThinking(false);
-              fullText += parsed.value;
-              sentenceBuffer += parsed.value;
+              // Strip QR marker before display and TTS
+              const chunkVal = parsed.value.replace(/\[SHOW_QR\]/gi, "");
+              if (chunkVal !== parsed.value) showQrDetected = true;
+              fullText += chunkVal;
+              sentenceBuffer += chunkVal;
 
               if (!messageAdded) {
                 setMessages((prev) => [...prev, { id: botMessageId, text: fullText, sender: "bot", timestamp: new Date() }]);
@@ -300,6 +339,17 @@ export default function Chat({
               // Flush any remaining text that didn't end with punctuation
               const remaining = sentenceBuffer.trim();
               if (remaining) enqueueTts(cleanTextForTTS(remaining), gesture);
+              // Show QR and speak the prompt when marker was detected
+              if (showQrDetected) {
+                setMessages((prev) =>
+                  prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
+                );
+                enqueueTts("You can scan this QR code for detailed directions and information.", gesture);
+              }
+            } else if (parsed.type === "show_qr") {
+              setMessages((prev) =>
+                prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
+              );
             } else if (parsed.type === "error") {
               throw new Error(parsed.value);
             }
@@ -403,10 +453,15 @@ export default function Chat({
     <div className="flex h-full flex-col bg-white">
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shadow-sm z-10">
-        <span className="text-base font-bold text-[#0a2240]">Conversation</span>
-        <div className="flex items-center gap-3">
+        <span className="text-base font-bold text-[#0a2240] flex-shrink-0">Conversation</span>
+        <div className="flex items-center gap-2 min-w-0">
+          {queuedMessageCount > 0 && (
+            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
+              {queuedMessageCount} waiting
+            </span>
+          )}
           {isTtsBusy && (
-            <span className="text-xs text-gray-400 animate-pulse">Speaking…</span>
+            <span className="text-xs text-gray-400 animate-pulse whitespace-nowrap flex-shrink-0">Speaking…</span>
           )}
           {onClose && (
             <button
@@ -443,12 +498,22 @@ export default function Chat({
                           a: ({ node, ...props }) => <a className="text-[#0a2240] font-semibold hover:underline" {...props} />
                         }}
                       >
-                        {message.text}
+                        {message.text.replace(/\[SHOW_QR\]/g, "").trim()}
                       </ReactMarkdown>
                     </div>
                     <p className="mt-1.5 ml-1 text-[11px] font-medium text-gray-400" suppressHydrationWarning>
                       {formatTime(message.timestamp)}
                     </p>
+                    {message.showQr && (
+                      <div className="mt-3 ml-1">
+                        <p className="text-[11px] text-gray-500 mb-1.5">You can scan this QR for detailed information:</p>
+                        <img
+                          src="/qrcode.svg"
+                          alt="Location QR Code"
+                          className="w-32 h-32 rounded-lg border border-gray-200 bg-white p-1"
+                        />
+                      </div>
+                    )}
                   </div>
                 </div>
               ) : (
