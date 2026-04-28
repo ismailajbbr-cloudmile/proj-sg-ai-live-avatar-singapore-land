@@ -262,7 +262,9 @@ export default function ChatPage() {
     setPlayheadMs(0);
     setVisemeFrames([]);
     setGesture("idle");
-    chatSpeechEndCallbackRef.current?.();
+    // Do NOT call chatSpeechEndCallbackRef here — that callback drains the message queue
+    // and must only fire when audio ends naturally (onEnded), not when interrupted.
+    // Calling it here causes concurrent handleSend calls that skip queued messages.
   }, [stopRaf]);
 
   // ── Called by Chat.tsx for each TTS sentence segment ────────────────────
