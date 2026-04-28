@@ -30,7 +30,9 @@ Gesture rules — be very selective, most responses should use "idle":
 - lookup: ONLY when recalling a specific fact or statistic
 - excited: ONLY for rare, clearly high-energy moments (e.g. announcing a major limited-time event). Do NOT use for normal hellos or routine welcomes.
 
-When in doubt, use "idle"."""
+When in doubt, use "idle".
+
+When the user asks about directions, how to get somewhere, building location, floor numbers, or how to find a specific store/facility/exit, append exactly "[SHOW_QR]" on its own new line at the very end of your response. Do not add it for any other type of question."""
 
 
 def _datastore_path(datastore_id: str) -> str:
