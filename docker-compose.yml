@@ -27,7 +27,7 @@ services:
     env_file:
       - ./.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://app-user:aiCTO%402025@cloud-sql-proxy:5432/avatar_chatbot
+      DATABASE_URL: ${DATABASE_URL_PROD}
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
     volumes:
       - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
