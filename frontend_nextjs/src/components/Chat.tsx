@@ -453,15 +453,15 @@ export default function Chat({
     <div className="flex h-full flex-col bg-white">
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shadow-sm z-10">
-        <span className="text-base font-bold text-[#0a2240]">Conversation</span>
-        <div className="flex items-center gap-3">
+        <span className="text-base font-bold text-[#0a2240] flex-shrink-0">Conversation</span>
+        <div className="flex items-center gap-2 min-w-0">
           {queuedMessageCount > 0 && (
-            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5">
-              {queuedMessageCount} message{queuedMessageCount > 1 ? "s" : ""} waiting
+            <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
+              {queuedMessageCount} waiting
             </span>
           )}
           {isTtsBusy && (
-            <span className="text-xs text-gray-400 animate-pulse">Speaking…</span>
+            <span className="text-xs text-gray-400 animate-pulse whitespace-nowrap flex-shrink-0">Speaking…</span>
           )}
           {onClose && (
             <button
