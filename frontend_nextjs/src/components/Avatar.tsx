@@ -520,7 +520,7 @@ function AvatarModel({
     if (neckRef.current) neckRef.current.rotation.x = NECK_ROTATION_X;
 
     const armK = 1 - Math.exp(-2.0 * dt);
-    const ap = GESTURE_MOTION[gesture].arms;
+    const ap = ARMS_RELAXED_AT_SIDES;
     const da = dampedArmRef.current;
     const lerpTo = (
       cur: { x: number; y: number; z: number },
