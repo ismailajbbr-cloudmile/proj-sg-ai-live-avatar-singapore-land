@@ -1,6 +1,7 @@
 import secrets
 import string
 import uuid
+from datetime import datetime
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
@@ -28,6 +29,7 @@ class UserResponse(BaseModel):
     id: uuid.UUID
     username: str
     is_admin: bool
+    created_at: datetime
 
     model_config = {"from_attributes": True}
 

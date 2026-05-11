@@ -70,7 +70,6 @@ interface CreateUserModalProps {
 
 function CreateUserModal({ open, onClose, onSuccess }: CreateUserModalProps) {
     const [username, setUsername] = useState("");
-    const [isAdmin, setIsAdmin] = useState(false);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState("");
     const [generatedPassword, setGeneratedPassword] = useState<string | null>(null);
@@ -79,7 +78,6 @@ function CreateUserModal({ open, onClose, onSuccess }: CreateUserModalProps) {
     useEffect(() => {
         if (!open) return;
         setUsername("");
-        setIsAdmin(false);
         setError("");
         setGeneratedPassword(null);
         setIsLoading(false);
@@ -94,7 +92,7 @@ function CreateUserModal({ open, onClose, onSuccess }: CreateUserModalProps) {
             const res = await fetch("/api/admin/users", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ username: username.trim(), is_admin: isAdmin }),
+                body: JSON.stringify({ username: username.trim() }),
             });
             const data = await res.json();
             if (!res.ok) {
@@ -112,7 +110,6 @@ function CreateUserModal({ open, onClose, onSuccess }: CreateUserModalProps) {
 
     const handleClose = () => {
         setUsername("");
-        setIsAdmin(false);
         setError("");
         setGeneratedPassword(null);
         onClose();
@@ -150,18 +147,6 @@ function CreateUserModal({ open, onClose, onSuccess }: CreateUserModalProps) {
                             autoComplete="off"
                             className="block w-full rounded-lg border border-gray-300 py-2.5 px-4 text-sm text-gray-900 outline-none transition-all focus:border-transparent focus:ring-2 focus:ring-[#0a2240]"
                         />
-                    </div>
-                    <div className="flex items-center gap-3">
-                        <input
-                            type="checkbox"
-                            id="is_admin"
-                            checked={isAdmin}
-                            onChange={(e) => setIsAdmin(e.target.checked)}
-                            className="h-4 w-4 rounded border-gray-300 text-[#0a2240] focus:ring-[#0a2240]"
-                        />
-                        <label htmlFor="is_admin" className="text-sm font-medium text-gray-700">
-                            Grant admin privileges
-                        </label>
                     </div>
                     {error && (
                         <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-600" role="alert">
