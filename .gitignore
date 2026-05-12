@@ -106,7 +106,6 @@ celerybeat.pid
 # Environments
 
 .venv
-env/
 venv/
 ENV/
 env.bak/
@@ -237,12 +236,8 @@ credentials
 config
 
 # GCP service account keys (NEVER COMMIT THESE!)
-*-key.json
-frontend_nextjs/*.json
 
 # Environment variables
-.env
-.env.*
 !.env.example
 
 # Database
