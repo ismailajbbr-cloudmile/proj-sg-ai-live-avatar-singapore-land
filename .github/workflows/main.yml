@@ -49,8 +49,9 @@ jobs:
           # 4. Ensure Docker is running and permissions are set
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo systemctl start docker && sudo systemctl enable docker && sudo usermod -aG docker $USER"
 
-          # 5. Clean Slate (Remove old .git and .env to avoid conflicts, fix permissions so SCP can overwrite)
-          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo rm -rf ${{ env.APP_DIR }}/.git ${{ env.APP_DIR }}/.env && sudo chmod -R u+rw ${{ env.APP_DIR }}"
+          # 5. Stop containers, clean slate (stop first to prevent Docker recreating directory mounts)
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose down --remove-orphans 2>/dev/null || true"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo rm -rf ${{ env.APP_DIR }}/.git ${{ env.APP_DIR }}/.env ${{ env.APP_DIR }}/backend_fastapi/credentials ${{ env.APP_DIR }}/frontend_nextjs/credentials && sudo chmod -R u+rw ${{ env.APP_DIR }}"
 
           # 6. Fetch Secret and format it correctly (Fixes the @ character error)
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'DB_PASSWORD=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='prod-db-password' >> ${{ env.APP_DIR }}/.env"
@@ -61,8 +62,7 @@ jobs:
           # 8. Copy code to server
           gcloud compute scp --recurse . ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }} --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
 
-          # 9. Stop existing containers, Build (No Cache), and Start
-          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml down || true"
+          # 9. Build (No Cache) and Start
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml build --no-cache"
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml up -d"
 

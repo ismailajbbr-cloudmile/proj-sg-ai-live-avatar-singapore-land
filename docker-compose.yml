@@ -2,6 +2,7 @@ services:
   cloud-sql-proxy:
     image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2
     restart: unless-stopped
+    network_mode: host
     command:
       - "--address=0.0.0.0"
       - "--port=5432"
@@ -11,19 +12,14 @@ services:
       GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
     volumes:
       - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
-    expose:
-      - "5432"
-    dns:
-      - 8.8.8.8
-      - 8.8.4.4
 
   backend:
     build:
       context: ./backend_fastapi
       dockerfile: Dockerfile
     restart: unless-stopped
-    depends_on:
-      - cloud-sql-proxy
+    extra_hosts:
+      - "cloud-sql-proxy:host-gateway"
     env_file:
       - ./.env
     environment:
@@ -44,6 +40,8 @@ services:
     restart: unless-stopped
     depends_on:
       - backend
+    extra_hosts:
+      - "cloud-sql-proxy:host-gateway"
     env_file:
       - ./.env
     environment:
