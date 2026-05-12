@@ -55,14 +55,16 @@ jobs:
           # 6. Fetch Secret and format it correctly (Fixes the @ character error)
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'DB_PASSWORD=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='prod-db-password' >> ${{ env.APP_DIR }}/.env"
 
-          # 7. Copy code to server (Excluding .git to avoid the Permission Denied error)
-          # Make sure you have a .gcloudignore file in your repo!
+          # 7. Remove files that should not be uploaded (key file already lives on VM)
+          rm -f avatar-chatbot-key.json
+
+          # 8. Copy code to server
           gcloud compute scp --recurse . ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }} --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
 
-          # 8. Stop existing containers, Build (No Cache), and Start
+          # 9. Stop existing containers, Build (No Cache), and Start
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml down || true"
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml build --no-cache"
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml up -d"
 
-          # 9. Clean up old images
+          # 10. Clean up old images
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo docker image prune -f"
