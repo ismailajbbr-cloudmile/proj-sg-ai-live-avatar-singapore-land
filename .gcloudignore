@@ -1,0 +1,15 @@
+.git
+.git/
+.gitignore
+.idea/
+.vscode/
+.claude/
+CLAUDE.md
+*.md
+!README.md
+__pycache__/
+node_modules/
+.next/
+.venv/
+*.pyc
+.DS_Store
