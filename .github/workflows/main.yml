@@ -54,8 +54,14 @@ jobs:
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo rm -rf ${{ env.APP_DIR }}/.git ${{ env.APP_DIR }}/.env ${{ env.APP_DIR }}/backend_fastapi/credentials ${{ env.APP_DIR }}/frontend_nextjs/credentials && sudo chmod -R u+rw ${{ env.APP_DIR }}"
 
           # 6. Fetch Secret and format it correctly (Fixes the @ character error)
-          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'DB_PASSWORD=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='prod-db-password' >> ${{ env.APP_DIR }}/.env"
-
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'POSTGRES_PASSWORD=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='POSTGRES_PASSWORD' >> ${{ env.APP_DIR }}/.env"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'DATABASE_URL=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='DATABASE_URL' >> ${{ env.APP_DIR }}/.env"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'DATABASE_URL_DOCKER=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='DATABASE_URL_DOCKER' >> ${{ env.APP_DIR }}/.env"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'DATABASE_URL_PROD=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='DATABASE_URL_PROD' >> ${{ env.APP_DIR }}/.env"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'JWT_SECRET=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='JWT_SECRET' >> ${{ env.APP_DIR }}/.env"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'ADMIN_PASSWORD=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='ADMIN_PASSWORD' >> ${{ env.APP_DIR }}/.env"
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="echo -n 'AVATAR_CHATBOT_JSON_KEY=' > ${{ env.APP_DIR }}/.env && gcloud secrets versions access latest --secret='AVATAR_CHATBOT_JSON_KEY' >> ${{ env.APP_DIR }}/.env"
+          
           # 7. Remove files that should not be uploaded (key file already lives on VM)
           rm -f avatar-chatbot-key.json
 
