@@ -73,6 +73,12 @@ jobs:
             printf 'ADMIN_PASSWORD=%s\n' \"\$(gcloud secrets versions access latest --secret='ADMIN_PASSWORD')\" >> .env
             printf 'ADMIN_USERNAME=%s\n' \"\$(gcloud secrets versions access latest --secret='ADMIN_USERNAME')\" >> .env
             printf 'GOOGLE_VERTEX_PROJECT=%s\n' \"\$(gcloud secrets versions access latest --secret='GOOGLE_VERTEX_PROJECT')\" >> .env
+            printf 'GOOGLE_VERTEX_LOCATION=%s\n' \"\$(gcloud secrets versions access latest --secret='GOOGLE_VERTEX_LOCATION')\" >> .env
+            printf 'VERTEX_AI_WEB_DATASTORE_ID=%s\n' \"\$(gcloud secrets versions access latest --secret='VERTEX_AI_WEB_DATASTORE_ID')\" >> .env
+            printf 'VERTEX_AI_PDF_DATASTORE_ID=%s\n' \"\$(gcloud secrets versions access latest --secret='VERTEX_AI_PDF_DATASTORE_ID')\" >> .env
+            printf 'SESSION_IDLE_TIMEOUT_MINUTES=%s\n' \"\$(gcloud secrets versions access latest --secret='SESSION_IDLE_TIMEOUT_MINUTES')\" >> .env
+            printf 'TTS_MODEL=%s\n' \"\$(gcloud secrets versions access latest --secret='TTS_MODEL')\" >> .env
+            printf 'TTS_VOICE_NAME=%s\n' \"\$(gcloud secrets versions access latest --secret='TTS_VOICE_NAME')\" >> .env
             printf 'NEXT_PUBLIC_ORIGIN=%s\n' \"\$(gcloud secrets versions access latest --secret='NEXT_PUBLIC_ORIGIN')\" >> .env
 
             # Decode base64 GCP service account key to JSON file for Docker volume mount
