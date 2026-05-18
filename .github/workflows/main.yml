@@ -65,15 +65,15 @@ jobs:
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="
             cd ${{ env.APP_DIR }}
 
-            # Build .env with production secrets only
+            # Build .env with production secrets only (printf ensures newline after each value)
             > .env
-            echo -n 'POSTGRES_PASSWORD=' >> .env && gcloud secrets versions access latest --secret='POSTGRES_PASSWORD' >> .env
-            echo -n 'DATABASE_URL_PROD=' >> .env && gcloud secrets versions access latest --secret='DATABASE_URL_PROD' >> .env
-            echo -n 'JWT_SECRET=' >> .env && gcloud secrets versions access latest --secret='JWT_SECRET' >> .env
-            echo -n 'ADMIN_PASSWORD=' >> .env && gcloud secrets versions access latest --secret='ADMIN_PASSWORD' >> .env
-            echo -n 'ADMIN_USERNAME=' >> .env && gcloud secrets versions access latest --secret='ADMIN_USERNAME' >> .env
-            echo -n 'GOOGLE_VERTEX_PROJECT=' >> .env && gcloud secrets versions access latest --secret='GOOGLE_VERTEX_PROJECT' >> .env
-            echo -n 'NEXT_PUBLIC_ORIGIN=' >> .env && gcloud secrets versions access latest --secret='NEXT_PUBLIC_ORIGIN' >> .env
+            printf 'POSTGRES_PASSWORD=%s\n' \"\$(gcloud secrets versions access latest --secret='POSTGRES_PASSWORD')\" >> .env
+            printf 'DATABASE_URL_PROD=%s\n' \"\$(gcloud secrets versions access latest --secret='DATABASE_URL_PROD')\" >> .env
+            printf 'JWT_SECRET=%s\n' \"\$(gcloud secrets versions access latest --secret='JWT_SECRET')\" >> .env
+            printf 'ADMIN_PASSWORD=%s\n' \"\$(gcloud secrets versions access latest --secret='ADMIN_PASSWORD')\" >> .env
+            printf 'ADMIN_USERNAME=%s\n' \"\$(gcloud secrets versions access latest --secret='ADMIN_USERNAME')\" >> .env
+            printf 'GOOGLE_VERTEX_PROJECT=%s\n' \"\$(gcloud secrets versions access latest --secret='GOOGLE_VERTEX_PROJECT')\" >> .env
+            printf 'NEXT_PUBLIC_ORIGIN=%s\n' \"\$(gcloud secrets versions access latest --secret='NEXT_PUBLIC_ORIGIN')\" >> .env
 
             # Decode base64 GCP service account key to JSON file for Docker volume mount
             gcloud secrets versions access latest --secret='AVATAR_CHATBOT_JSON_KEY' | base64 -d > avatar-chatbot-key.json
