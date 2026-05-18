@@ -56,8 +56,10 @@ jobs:
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose down --remove-orphans 2>/dev/null || true"
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo rm -rf ${{ env.APP_DIR }}/.git ${{ env.APP_DIR }}/.env ${{ env.APP_DIR }}/backend_fastapi/credentials ${{ env.APP_DIR }}/frontend_nextjs/credentials && sudo chmod -R u+rw ${{ env.APP_DIR }}"
 
-          # 6. Copy code to server
-          gcloud compute scp --recurse . ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }} --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
+          # 6. Copy code to server (tar to exclude node_modules, .next, .venv, .git)
+          tar czf /tmp/deploy.tar.gz --exclude=node_modules --exclude=.next --exclude=.venv --exclude=.git --exclude=__pycache__ .
+          gcloud compute scp /tmp/deploy.tar.gz ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }}/deploy.tar.gz --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
+          gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && tar xzf deploy.tar.gz && rm deploy.tar.gz"
 
           # 7. Fetch secrets from GCP Secret Manager (after scp so .env doesn't get overwritten)
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="
