@@ -237,7 +237,7 @@ logs/
 *.pem
 *.key
 credentials
-config
+.aws/config
 
 # GCP service account keys (NEVER COMMIT THESE!)
 
