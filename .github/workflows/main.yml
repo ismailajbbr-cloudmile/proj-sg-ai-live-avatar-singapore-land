@@ -34,8 +34,11 @@ jobs:
       - name: Setup Google Cloud CLI
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Install NumPy for faster IAP tunneling
+        run: pip install numpy
+
       - name: Deploy code and build on server
-        timeout-minutes: 30
+        timeout-minutes: 60
         run: |
           # 1. Set Project Context
           gcloud config set project ${{ vars.GCP_PROJECT_ID }}
