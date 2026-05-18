@@ -35,7 +35,7 @@ jobs:
         uses: google-github-actions/setup-gcloud@v2
 
       - name: Install NumPy for faster IAP tunneling
-        run: pip install numpy
+        run: $(gcloud info --format="value(basic.python_location)") -m pip install numpy
 
       - name: Deploy code and build on server
         timeout-minutes: 60
@@ -56,7 +56,10 @@ jobs:
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose down --remove-orphans 2>/dev/null || true"
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="sudo rm -rf ${{ env.APP_DIR }}/.git ${{ env.APP_DIR }}/.env ${{ env.APP_DIR }}/backend_fastapi/credentials ${{ env.APP_DIR }}/frontend_nextjs/credentials && sudo chmod -R u+rw ${{ env.APP_DIR }}"
 
-          # 6. Fetch secrets from GCP Secret Manager
+          # 6. Copy code to server
+          gcloud compute scp --recurse . ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }} --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
+
+          # 7. Fetch secrets from GCP Secret Manager (after scp so .env doesn't get overwritten)
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="
             cd ${{ env.APP_DIR }}
 
@@ -73,9 +76,6 @@ jobs:
             # Decode base64 GCP service account key to JSON file for Docker volume mount
             gcloud secrets versions access latest --secret='AVATAR_CHATBOT_JSON_KEY' | base64 -d > avatar-chatbot-key.json
           "
-
-          # 7. Copy code to server
-          gcloud compute scp --recurse . ${{ vars.GCP_INSTANCE_NAME }}:${{ env.APP_DIR }} --tunnel-through-iap --zone=${{ vars.GCP_ZONE }}
 
           # 8. Build (No Cache) and Start
           gcloud compute ssh ${{ vars.GCP_INSTANCE_NAME }} --zone=${{ vars.GCP_ZONE }} --tunnel-through-iap --command="cd ${{ env.APP_DIR }} && sudo docker compose -f docker-compose.yml build --no-cache"
