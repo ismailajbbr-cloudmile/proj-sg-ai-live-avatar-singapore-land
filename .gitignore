@@ -1,3 +1,7 @@
+# Root secrets (created on VM by CI/CD from GCP Secret Manager)
+.env
+*-key.json
+
 # Python / FastAPI Backend
 # Byte-compiled / optimized / DLL files
 __pycache__/
