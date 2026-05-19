@@ -90,8 +90,12 @@ export default function ChatPage() {
   const rafRef = useRef<number | null>(null);
   const playTokenRef = useRef<number>(0);
 
+  // Closed captions
+  const [captionText, setCaptionText] = useState("");
+  const [captionsOn, setCaptionsOn] = useState(false);
+
   // Audio queue for sentence-by-sentence playback
-  type AudioSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
+  type AudioSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture; text: string };
   const audioQueueRef = useRef<AudioSegment[]>([]);
   const isPlayingRef = useRef(false);
   const playSegmentRef = useRef<((seg: AudioSegment) => void) | null>(null);
@@ -181,9 +185,10 @@ export default function ChatPage() {
 
   // ── Play a single audio segment ─────────────────────────────────────────
   const playSegment = useCallback((seg: AudioSegment) => {
-    const { audioBase64, mimeType, visemes, gesture: segGesture } = seg;
+    const { audioBase64, mimeType, visemes, gesture: segGesture, text } = seg;
 
     setGesture(segGesture);
+    setCaptionText(text);
     isPlayingRef.current = true;
 
     const token = playTokenRef.current + 1;
@@ -238,6 +243,7 @@ export default function ChatPage() {
       } else {
         isPlayingRef.current = false;
         setGesture("idle");
+        setCaptionText("");
         chatSpeechEndCallbackRef.current?.();
       }
     };
@@ -262,14 +268,49 @@ export default function ChatPage() {
     setPlayheadMs(0);
     setVisemeFrames([]);
     setGesture("idle");
+    setCaptionText("");
     // Do NOT call chatSpeechEndCallbackRef here — that callback drains the message queue
     // and must only fire when audio ends naturally (onEnded), not when interrupted.
     // Calling it here causes concurrent handleSend calls that skip queued messages.
   }, [stopRaf]);
 
+  // ── Skip current segment, play next in queue ─────────────────────────────
+  const skipSegment = useCallback(() => {
+    playTokenRef.current += 1;
+    const el = audioRef.current;
+    if (el) try { el.pause(); } catch { }
+    stopRaf();
+    setPlayheadMs(0);
+    setVisemeFrames([]);
+
+    const next = audioQueueRef.current.shift();
+    if (next) {
+      playSegment(next);
+    } else {
+      isPlayingRef.current = false;
+      setGesture("idle");
+      chatSpeechEndCallbackRef.current?.();
+    }
+  }, [stopRaf, playSegment]);
+
+  // ── Skip all speech and drain message queue ───────────────────────────────
+  const skipAll = useCallback(() => {
+    audioQueueRef.current = [];
+    playTokenRef.current += 1;
+    isPlayingRef.current = false;
+    const el = audioRef.current;
+    if (el) try { el.pause(); } catch { }
+    stopRaf();
+    setPlayheadMs(0);
+    setVisemeFrames([]);
+    setGesture("idle");
+    setCaptionText("");
+    chatSpeechEndCallbackRef.current?.();
+  }, [stopRaf]);
+
   // ── Called by Chat.tsx for each TTS sentence segment ────────────────────
-  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[], newGesture: AvatarGesture = "idle") => {
-    const seg: AudioSegment = { audioBase64, mimeType, visemes, gesture: newGesture };
+  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[], newGesture: AvatarGesture = "idle", text: string = "") => {
+    const seg: AudioSegment = { audioBase64, mimeType, visemes, gesture: newGesture, text };
     if (isPlayingRef.current) {
       audioQueueRef.current.push(seg);
     } else {
@@ -288,6 +329,13 @@ export default function ChatPage() {
 
       {/* ── Left Side: Avatar Container (Flex pushing) ── */}
       <div className="relative flex-1 transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] overflow-hidden h-full drop-shadow-sm">
+        {/* Background image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: "url('/marina-square-hero.jpg')" }}
+        />
+        <div className="absolute inset-0 bg-white/70 backdrop-blur-sm" />
+
         <div className="absolute inset-0">
           <Avatar
             isTalking={isTalking}
@@ -296,6 +344,28 @@ export default function ChatPage() {
             gesture={gesture}
           />
         </div>
+
+        {/* ── Skip Speech Buttons (visible while avatar is talking) ── */}
+        {isTalking && (
+          <div className="absolute right-4 bottom-28 z-20 flex flex-col gap-2">
+            {audioQueueRef.current.length > 0 && (
+              <button
+                onClick={skipSegment}
+                className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md px-4 py-2 text-sm font-medium text-[#0a2240] shadow-md border border-white/50 hover:bg-white transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/></svg>
+                Next
+              </button>
+            )}
+            <button
+              onClick={skipAll}
+              className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md px-4 py-2 text-sm font-medium text-[#0a2240] shadow-md border border-white/50 hover:bg-white transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6zm2 0l4.5 3.14V9.86L11.5 12z"/><rect x="16" y="6" width="2" height="12"/></svg>
+              Skip All
+            </button>
+          </div>
+        )}
 
         {/* ── Top Header Bar ── */}
         <div className="absolute left-6 right-6 top-6 z-20 flex items-center justify-between">
@@ -311,6 +381,15 @@ export default function ChatPage() {
             totalIdleSecs={totalIdleSecs}
           />
         </div>
+
+        {/* ── Closed Captions ── */}
+        {captionsOn && captionText && (
+          <div className="absolute left-4 right-4 z-20 flex justify-center bottom-32 md:bottom-36 pointer-events-none">
+            <div className="max-w-[80%] rounded-lg bg-black/70 backdrop-blur-sm px-4 py-2.5 text-center">
+              <p className="text-sm md:text-base text-white leading-relaxed">{captionText}</p>
+            </div>
+          </div>
+        )}
 
         {/* ── Bottom Toolbar Center ── */}
         <div className="absolute left-4 right-4 z-20 flex justify-center bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] pointer-events-none">
@@ -378,6 +457,13 @@ export default function ChatPage() {
               <ToolbarBtn active={isChatOpen} onClick={() => setIsChatOpen((p) => !p)} label="Chat">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </ToolbarBtn>
+
+              <ToolbarBtn active={captionsOn} onClick={() => setCaptionsOn((p) => !p)} label="Captions">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="M7 12h2m4 0h4M7 16h8" />
                 </svg>
               </ToolbarBtn>
 

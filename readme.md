@@ -58,16 +58,19 @@ cp .env.example .env
 | `TTS_VOICE_NAME` | TTS voice (default: `Achernar`) |
 | `NEXT_PUBLIC_ORIGIN` | Frontend origin URL for CORS |
 
-### GCP Service Account Key
+### GCP Authentication
 
-**Development:** Place the raw JSON key file at the repo root:
-```
-avatar_chatbot/
-└── avatar-chatbot-key.json   ← here (gitignored)
-```
-Both backend and frontend containers mount it at `/app/credentials/gcp-key.json`.
+**Development:** Uses [Application Default Credentials (ADC)](https://cloud.google.com/docs/authentication/application-default-credentials) — no key file needed.
 
-**Production:** The key is stored as a **base64-encoded** secret in GCP Secret Manager (`AVATAR_CHATBOT_JSON_KEY`). The CI/CD pipeline decodes it and writes `avatar-chatbot-key.json` on the VM at deploy time.
+```bash
+# One-time setup: login with your GCP account
+brew install google-cloud-sdk   # if not installed
+gcloud auth application-default login --project=YOUR_PROJECT_ID
+```
+
+Docker Compose dev mounts `~/.config/gcloud/application_default_credentials.json` into containers automatically.
+
+**Production:** A service account key is stored as a **base64-encoded** secret in GCP Secret Manager (`AVATAR_CHATBOT_JSON_KEY`). The CI/CD pipeline decodes it and writes `avatar-chatbot-key.json` on the VM at deploy time.
 ```bash
 # To encode the key for Secret Manager:
 base64 -i avatar-chatbot-key.json | tr -d '\n' | gcloud secrets versions add AVATAR_CHATBOT_JSON_KEY --data-file=-

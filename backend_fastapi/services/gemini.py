@@ -32,7 +32,14 @@ Gesture rules — be very selective, most responses should use "idle":
 
 When in doubt, use "idle".
 
-When the user asks about directions, how to get somewhere, building location, floor numbers, or how to find a specific store/facility/exit, append exactly "[SHOW_QR]" on its own new line at the very end of your response. Do not add it for any other type of question."""
+QR code rules for "[SHOW_QR]":
+The QR code links to an INDOOR wayfinder map of Marina Square. It is ONLY useful for navigating WITHIN the building.
+Append exactly "[SHOW_QR]" on its own new line at the very end of your response ONLY when the user asks how to find or get to a specific store, restaurant, facility, exit, or floor INSIDE Marina Square.
+Do NOT append "[SHOW_QR]" for:
+- Questions about getting TO Marina Square from outside (e.g. "How to get to Marina Square from Changi?")
+- General information about stores, events, promotions, opening hours, or parking
+- Questions about places outside Marina Square
+- Any question that does not require indoor navigation within the building"""
 
 
 def _datastore_path(datastore_id: str) -> str:

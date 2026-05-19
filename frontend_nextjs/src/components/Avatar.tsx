@@ -567,9 +567,11 @@ export default function Avatar({
   gesture = "idle",
 }: AvatarProps) {
   return (
-    <div className="h-full w-full bg-[#f8f9fa]">
+    <div className="h-full w-full">
       <Canvas
         camera={{ position: [CAMERA_X, CAMERA_Y, CAMERA_Z], fov: CAMERA_FOV }}
+        gl={{ alpha: true }}
+        style={{ background: "transparent" }}
       >
         <ambientLight intensity={AMBIENT_LIGHT_INTENSITY} />
         <directionalLight
