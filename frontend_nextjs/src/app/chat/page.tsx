@@ -288,6 +288,13 @@ export default function ChatPage() {
 
       {/* ── Left Side: Avatar Container (Flex pushing) ── */}
       <div className="relative flex-1 transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] overflow-hidden h-full drop-shadow-sm">
+        {/* Background image */}
+        <div
+          className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+          style={{ backgroundImage: "url('/marina-square-hero.jpg')" }}
+        />
+        <div className="absolute inset-0 bg-white/70 backdrop-blur-sm" />
+
         <div className="absolute inset-0">
           <Avatar
             isTalking={isTalking}

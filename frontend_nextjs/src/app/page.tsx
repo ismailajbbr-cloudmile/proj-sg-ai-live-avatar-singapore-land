@@ -100,6 +100,13 @@ export default function LobbyPage() {
   return (
     <div className="relative flex h-screen w-full justify-center overflow-hidden bg-[#f8f9fa]">
 
+      {/* Background image */}
+      <div
+        className="absolute inset-0 bg-cover bg-center bg-no-repeat"
+        style={{ backgroundImage: "url('/marina-square-hero.jpg')" }}
+      />
+      <div className="absolute inset-0 bg-white/80 backdrop-blur-sm" />
+
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 right-0 h-20 bg-white shadow-sm flex items-center justify-between px-8 z-10 w-full">
         <img src="/logo-marinasquare.png" alt="Marina Square" className="h-12 object-contain" />
@@ -129,7 +136,7 @@ export default function LobbyPage() {
       <div className="relative w-full max-w-5xl flex flex-col items-center justify-center pt-24 pb-8 px-4 h-full">
 
         {/* Avatar preview card */}
-        <div className="relative w-full overflow-hidden rounded-2xl shadow-2xl shadow-black/5 bg-white border border-gray-100 flex-1 max-h-[70vh]">
+        <div className="relative w-full overflow-hidden rounded-2xl flex-1 max-h-[70vh]">
           <Suspense fallback={null}>
             <Avatar />
           </Suspense>
