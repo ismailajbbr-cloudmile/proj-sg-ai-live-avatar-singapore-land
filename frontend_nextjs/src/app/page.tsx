@@ -12,6 +12,39 @@ import Avatar from "@/components/Avatar";
 
 const AVATAR_NAME = "Marina Square AI Concierge";
 
+const PROMPT_EXAMPLES = [
+  "Where is the nearest restaurant?",
+  "What events are happening this week?",
+  "How do I get to Level 3?",
+  "Where can I find parking?",
+  "What time does the mall close?",
+  "Are there any promotions today?",
+];
+
+function RotatingPrompt() {
+  const [index, setIndex] = useState(0);
+  const [fade, setFade] = useState(true);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setFade(false);
+      setTimeout(() => {
+        setIndex((i) => (i + 1) % PROMPT_EXAMPLES.length);
+        setFade(true);
+      }, 400);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <span
+      className={`inline-block transition-all duration-400 ${fade ? "opacity-100 translate-y-0" : "opacity-0 translate-y-2"}`}
+    >
+      &ldquo;{PROMPT_EXAMPLES[index]}&rdquo;
+    </span>
+  );
+}
+
 
 function SingaporeLandLogo() {
   return (
@@ -136,21 +169,36 @@ export default function LobbyPage() {
       <div className="relative w-full max-w-5xl flex flex-col items-center justify-center pt-24 pb-8 px-4 h-full">
 
         {/* Avatar preview card */}
-        <div className="relative w-full overflow-hidden rounded-2xl flex-1 max-h-[70vh]">
+        <div className="relative w-full overflow-hidden rounded-2xl flex-1 max-h-[60vh]">
           <Suspense fallback={null}>
             <Avatar />
           </Suspense>
         </div>
 
+        {/* Welcome text + rotating prompts */}
+        <div className="mt-4 text-center space-y-2">
+          <h1 className="text-2xl md:text-3xl font-bold text-[#0a2240]">
+            Hi, I&apos;m your AI Concierge
+          </h1>
+          <p className="text-sm md:text-base text-[#0a2240]/60">
+            Ask me anything about Marina Square
+          </p>
+          <div className="h-8 flex items-center justify-center">
+            <p className="text-sm md:text-base font-medium text-[#2323a8] italic">
+              <RotatingPrompt />
+            </p>
+          </div>
+        </div>
+
         {/* Error hint */}
         {permError && (
-          <p className="mt-4 text-sm font-medium text-amber-600 bg-amber-50 px-4 py-2 rounded-lg">
-            ⚠️ {permError}
+          <p className="mt-3 text-sm font-medium text-amber-600 bg-amber-50 px-4 py-2 rounded-lg">
+            {permError}
           </p>
         )}
 
         {/* Bottom controls */}
-        <div className="mt-8 mb-4 flex items-center bg-white p-3 rounded-full shadow-lg border border-gray-100">
+        <div className="mt-4 mb-4 flex items-center bg-white p-3 rounded-full shadow-lg border border-gray-100">
           <button
             onClick={handleStartChat}
             disabled={isStarting}
