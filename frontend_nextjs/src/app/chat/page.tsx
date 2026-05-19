@@ -267,6 +267,39 @@ export default function ChatPage() {
     // Calling it here causes concurrent handleSend calls that skip queued messages.
   }, [stopRaf]);
 
+  // ── Skip current segment, play next in queue ─────────────────────────────
+  const skipSegment = useCallback(() => {
+    playTokenRef.current += 1;
+    const el = audioRef.current;
+    if (el) try { el.pause(); } catch { }
+    stopRaf();
+    setPlayheadMs(0);
+    setVisemeFrames([]);
+
+    const next = audioQueueRef.current.shift();
+    if (next) {
+      playSegment(next);
+    } else {
+      isPlayingRef.current = false;
+      setGesture("idle");
+      chatSpeechEndCallbackRef.current?.();
+    }
+  }, [stopRaf, playSegment]);
+
+  // ── Skip all speech and drain message queue ───────────────────────────────
+  const skipAll = useCallback(() => {
+    audioQueueRef.current = [];
+    playTokenRef.current += 1;
+    isPlayingRef.current = false;
+    const el = audioRef.current;
+    if (el) try { el.pause(); } catch { }
+    stopRaf();
+    setPlayheadMs(0);
+    setVisemeFrames([]);
+    setGesture("idle");
+    chatSpeechEndCallbackRef.current?.();
+  }, [stopRaf]);
+
   // ── Called by Chat.tsx for each TTS sentence segment ────────────────────
   const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[], newGesture: AvatarGesture = "idle") => {
     const seg: AudioSegment = { audioBase64, mimeType, visemes, gesture: newGesture };
@@ -303,6 +336,28 @@ export default function ChatPage() {
             gesture={gesture}
           />
         </div>
+
+        {/* ── Skip Speech Buttons (visible while avatar is talking) ── */}
+        {isTalking && (
+          <div className="absolute right-4 bottom-28 z-20 flex flex-col gap-2">
+            {audioQueueRef.current.length > 0 && (
+              <button
+                onClick={skipSegment}
+                className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md px-4 py-2 text-sm font-medium text-[#0a2240] shadow-md border border-white/50 hover:bg-white transition-colors"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/></svg>
+                Next
+              </button>
+            )}
+            <button
+              onClick={skipAll}
+              className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md px-4 py-2 text-sm font-medium text-[#0a2240] shadow-md border border-white/50 hover:bg-white transition-colors"
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6zm2 0l4.5 3.14V9.86L11.5 12z"/><rect x="16" y="6" width="2" height="12"/></svg>
+              Skip All
+            </button>
+          </div>
+        )}
 
         {/* ── Top Header Bar ── */}
         <div className="absolute left-6 right-6 top-6 z-20 flex items-center justify-between">
