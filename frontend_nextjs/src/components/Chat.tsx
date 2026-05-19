@@ -14,11 +14,11 @@ interface Message {
   showQr?: boolean;
 }
 
-type TtsSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
+type TtsSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture; text: string };
 
 interface ChatProps {
   /** Called whenever the bot has a new spoken sentence ready */
-  onBotSpeech?: (audioBase64: string, mimeType: string, visemes: VisemeFrame[], gesture: AvatarGesture) => void;
+  onBotSpeech?: (audioBase64: string, mimeType: string, visemes: VisemeFrame[], gesture: AvatarGesture, text: string) => void;
   /** Called when the user sends a new message — clears any queued audio */
   onClearSpeech?: () => void;
   language?: string | string[];
@@ -205,7 +205,7 @@ export default function Chat({
         return null;
       }
       const { audioBase64, mimeType, visemes } = await res.json();
-      return { audioBase64, mimeType, visemes, gesture };
+      return { audioBase64, mimeType, visemes, gesture, text };
     } catch (err) {
       console.error("[TTS] fetch failed:", err);
       return null;
@@ -223,7 +223,7 @@ export default function Chat({
       const seg = await pendingTtsRef.current[0];
       pendingTtsRef.current.shift();
       if (seg && onBotSpeech) {
-        onBotSpeech(seg.audioBase64, seg.mimeType, seg.visemes, seg.gesture);
+        onBotSpeech(seg.audioBase64, seg.mimeType, seg.visemes, seg.gesture, seg.text);
       }
     }
     ttsDrainRunningRef.current = false;

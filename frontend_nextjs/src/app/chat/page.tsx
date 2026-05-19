@@ -90,8 +90,12 @@ export default function ChatPage() {
   const rafRef = useRef<number | null>(null);
   const playTokenRef = useRef<number>(0);
 
+  // Closed captions
+  const [captionText, setCaptionText] = useState("");
+  const [captionsOn, setCaptionsOn] = useState(false);
+
   // Audio queue for sentence-by-sentence playback
-  type AudioSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture };
+  type AudioSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture; text: string };
   const audioQueueRef = useRef<AudioSegment[]>([]);
   const isPlayingRef = useRef(false);
   const playSegmentRef = useRef<((seg: AudioSegment) => void) | null>(null);
@@ -181,9 +185,10 @@ export default function ChatPage() {
 
   // ── Play a single audio segment ─────────────────────────────────────────
   const playSegment = useCallback((seg: AudioSegment) => {
-    const { audioBase64, mimeType, visemes, gesture: segGesture } = seg;
+    const { audioBase64, mimeType, visemes, gesture: segGesture, text } = seg;
 
     setGesture(segGesture);
+    setCaptionText(text);
     isPlayingRef.current = true;
 
     const token = playTokenRef.current + 1;
@@ -238,6 +243,7 @@ export default function ChatPage() {
       } else {
         isPlayingRef.current = false;
         setGesture("idle");
+        setCaptionText("");
         chatSpeechEndCallbackRef.current?.();
       }
     };
@@ -262,6 +268,7 @@ export default function ChatPage() {
     setPlayheadMs(0);
     setVisemeFrames([]);
     setGesture("idle");
+    setCaptionText("");
     // Do NOT call chatSpeechEndCallbackRef here — that callback drains the message queue
     // and must only fire when audio ends naturally (onEnded), not when interrupted.
     // Calling it here causes concurrent handleSend calls that skip queued messages.
@@ -297,12 +304,13 @@ export default function ChatPage() {
     setPlayheadMs(0);
     setVisemeFrames([]);
     setGesture("idle");
+    setCaptionText("");
     chatSpeechEndCallbackRef.current?.();
   }, [stopRaf]);
 
   // ── Called by Chat.tsx for each TTS sentence segment ────────────────────
-  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[], newGesture: AvatarGesture = "idle") => {
-    const seg: AudioSegment = { audioBase64, mimeType, visemes, gesture: newGesture };
+  const handleBotSpeech = useCallback((audioBase64: string, mimeType: string, visemes: VisemeFrame[], newGesture: AvatarGesture = "idle", text: string = "") => {
+    const seg: AudioSegment = { audioBase64, mimeType, visemes, gesture: newGesture, text };
     if (isPlayingRef.current) {
       audioQueueRef.current.push(seg);
     } else {
@@ -374,6 +382,15 @@ export default function ChatPage() {
           />
         </div>
 
+        {/* ── Closed Captions ── */}
+        {captionsOn && captionText && (
+          <div className="absolute left-4 right-4 z-20 flex justify-center bottom-32 md:bottom-36 pointer-events-none">
+            <div className="max-w-[80%] rounded-lg bg-black/70 backdrop-blur-sm px-4 py-2.5 text-center">
+              <p className="text-sm md:text-base text-white leading-relaxed">{captionText}</p>
+            </div>
+          </div>
+        )}
+
         {/* ── Bottom Toolbar Center ── */}
         <div className="absolute left-4 right-4 z-20 flex justify-center bottom-[max(1.5rem,env(safe-area-inset-bottom,0px))] pointer-events-none">
           <div
@@ -440,6 +457,13 @@ export default function ChatPage() {
               <ToolbarBtn active={isChatOpen} onClick={() => setIsChatOpen((p) => !p)} label="Chat">
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
+                </svg>
+              </ToolbarBtn>
+
+              <ToolbarBtn active={captionsOn} onClick={() => setCaptionsOn((p) => !p)} label="Captions">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <rect x="2" y="4" width="20" height="16" rx="2" />
+                  <path d="M7 12h2m4 0h4M7 16h8" />
                 </svg>
               </ToolbarBtn>
 
