@@ -127,6 +127,5 @@ Automated deployment to GCP Compute Engine via GitHub Actions (`.github/workflow
 
 ```bash
 # JWT secret
-# Secrets
 python -c "import secrets; print(secrets.token_hex(32))"
 ```
