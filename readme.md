@@ -1,44 +1,81 @@
-# Quickstart
+# AI Concierge — Marina Square
 
-## Prerequisites
+Singapore Land Group AI Concierge — a Next.js + FastAPI app with a 3D talking avatar, powered by Gemini and Google Cloud TTS.
+
+## Architecture
+
+| Service | Stack | Role |
+|---|---|---|
+| `frontend` | Next.js 16, React 19, Three.js | UI, 3D avatar with lip-sync |
+| `backend` | FastAPI, SQLAlchemy, Alembic | Auth, chat (Gemini), TTS, users, conversations |
+| `cloud-sql-proxy` | GCP Cloud SQL Proxy | Connects to Cloud SQL PostgreSQL |
+
+```
+avatar_chatbot/
+├── frontend_nextjs/       # Next.js app (App Router, standalone output)
+├── backend_fastapi/       # FastAPI backend
+├── docker-compose.yml     # Production (Cloud SQL Proxy)
+├── docker-compose.dev.yml # Development (local PostgreSQL)
+└── .github/workflows/     # CI/CD → GCP Compute Engine
+```
+
+## Features
+
+- 3D avatar with real-time lip-sync (viseme pipeline) and gesture animations
+- AI chat powered by Gemini 2.5 Flash via Vertex AI with RAG grounding (web + PDF datastores)
+- Text-to-speech via Gemini TTS with sentence-by-sentence audio streaming
+- Message queue — user messages sent while avatar is speaking are queued and processed in order
+- Kiosk idle timeout — configurable session timeout with countdown warning modal
+- Admin dashboard — user management, conversation history with markdown rendering, analytics
+- Auth via JWT (HTTP-only cookies) with middleware route protection
+
+## Quick Start
+
+### Prerequisites
 
 - Docker + Docker Compose
 - GCP service account key JSON file (for Vertex AI + TTS)
-- ....
----
 
-## 1. Environment File
-
-A single `.env` at the repo root is used by all services (backend, frontend, postgres).
+### 1. Environment File
 
 ```bash
 cp .env.example .env
 ```
 
-Fill in:
 | Variable | Description |
 |---|---|
-| `POSTGRES_PASSWORD` | Any secure password |
+| `POSTGRES_USER` / `POSTGRES_PASSWORD` / `POSTGRES_DB` | PostgreSQL credentials |
+| `DATABASE_URL_DOCKER` | Connection string for dev (Docker internal network) |
+| `DATABASE_URL_PROD` | Connection string for production (Cloud SQL Proxy) |
 | `JWT_SECRET` | Run: `python -c "import secrets; print(secrets.token_hex(32))"` |
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login credentials |
 | `GOOGLE_VERTEX_PROJECT` | GCP project ID |
+| `GOOGLE_VERTEX_LOCATION` | GCP region (default: `us-central1`) |
 | `VERTEX_AI_WEB_DATASTORE_ID` | Vertex AI Search datastore (website content) |
 | `VERTEX_AI_PDF_DATASTORE_ID` | Vertex AI Search datastore (PDFs) |
+| `SESSION_IDLE_TIMEOUT_MINUTES` | Kiosk idle timeout in minutes |
+| `TTS_MODEL` | TTS model (default: `gemini-2.5-flash-tts`) |
+| `TTS_VOICE_NAME` | TTS voice (default: `Achernar`) |
+| `NEXT_PUBLIC_ORIGIN` | Frontend origin URL for CORS |
 
-### GCP Key File
-Place your service account JSON at the repo root:
+### GCP Service Account Key
+
+**Development:** Place the raw JSON key file at the repo root:
 ```
 avatar_chatbot/
 └── avatar-chatbot-key.json   ← here (gitignored)
 ```
-Both backend and frontend containers mount it at `/app/credentials/gcp-key.json` automatically.
+Both backend and frontend containers mount it at `/app/credentials/gcp-key.json`.
 
----
+**Production:** The key is stored as a **base64-encoded** secret in GCP Secret Manager (`AVATAR_CHATBOT_JSON_KEY`). The CI/CD pipeline decodes it and writes `avatar-chatbot-key.json` on the VM at deploy time.
+```bash
+# To encode the key for Secret Manager:
+base64 -i avatar-chatbot-key.json | tr -d '\n' | gcloud secrets versions add AVATAR_CHATBOT_JSON_KEY --data-file=-
+```
 
-## 2. Run
+### 2. Run
 
-### Development (hot reload)
-Code changes in `backend_fastapi/` and `frontend_nextjs/src/` apply instantly — no rebuild needed.
+#### Development (hot reload)
 
 ```bash
 docker compose -f docker-compose.dev.yml up
@@ -50,51 +87,45 @@ docker compose -f docker-compose.dev.yml up
 | Backend API | http://localhost:8000 |
 | PostgreSQL | localhost:5432 |
 
-> `POSTGRES_PASSWORD` defaults to `devpassword` if not set in `.env`.
+#### Production
 
-### Production
 ```bash
 docker compose up --build
 ```
 
-Frontend is exposed on port 3000. Backend and PostgreSQL are internal only (not port-mapped).
+Frontend exposed on port 3000. Backend and Cloud SQL Proxy are internal only.
 
----
-
-## 3. Services at a Glance
-
-| Service | Image / Build | Role |
-|---|---|---|
-| `postgres` | `postgres:16-alpine` | Database |
-| `backend` | `./backend_fastapi` | FastAPI: auth, chat, TTS, users |
-| `frontend` | `./frontend_nextjs` | Next.js UI + 3D avatar |
-
-Backend waits for postgres health check before starting. Frontend waits for backend.
-
----
-
-## 4. Local Development (without Docker)
+### 3. Local Development (without Docker)
 
 ```bash
 # Backend
 cd backend_fastapi
-uv run uvicorn app.main:app --reload
+uv run uvicorn main:app --reload
 
 # Frontend
 cd frontend_nextjs
-npm run dev        # http://localhost:3000
+npm run dev
 ```
 
-Set `GOOGLE_APPLICATION_CREDENTIALS` to an absolute path to the GCP key file in `.env`.
+## CI/CD
 
----
+Automated deployment to GCP Compute Engine via GitHub Actions (`.github/workflows/main.yml`).
+
+**Triggers:** PR merge to `main` or manual `workflow_dispatch`.
+
+**Flow:**
+1. Checkout code + authenticate with GCP (Workload Identity Federation)
+2. Tar source code (excludes `node_modules`, `.next`, `.venv`, `.git`)
+3. Copy tar to VM and extract
+4. Fetch secrets from GCP Secret Manager → build `.env` on VM
+5. Decode base64 GCP service account key → `avatar-chatbot-key.json`
+6. Docker build + start
+
+**Secrets managed in GCP Secret Manager** — no `.env` or credentials in the repo.
 
 ## Generate Keys
 
 ```bash
 # JWT secret
 python -c "import secrets; print(secrets.token_hex(32))"
-
-# Fernet encryption key (if needed)
-cd backend_fastapi && uv run python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
 ```
