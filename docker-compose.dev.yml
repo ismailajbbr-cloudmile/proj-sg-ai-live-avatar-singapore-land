@@ -29,13 +29,13 @@ services:
       - ./.env
     environment:
       DATABASE_URL: ${DATABASE_URL_DOCKER}
-      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/application_default_credentials.json
       WATCHFILES_FORCE_POLLING: "1"
     volumes:
       - ./backend_fastapi:/app
       # Preserve the .venv installed at image build time — prevents source mount from overwriting it
       - /app/.venv
-      - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/app/credentials/application_default_credentials.json:ro
     ports:
       - "8000:8000"
     dns:
@@ -51,13 +51,13 @@ services:
     env_file:
       - ./.env
     environment:
-      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/gcp-key.json
+      GOOGLE_APPLICATION_CREDENTIALS: /app/credentials/application_default_credentials.json
       WATCHPACK_POLLING: "true"
       NEXT_PUBLIC_BACKEND_URL: http://backend:8000
     volumes:
       - ./frontend_nextjs:/app
       - /app/node_modules
-      - ./avatar-chatbot-key.json:/app/credentials/gcp-key.json:ro
+      - ${HOME}/.config/gcloud/application_default_credentials.json:/app/credentials/application_default_credentials.json:ro
     dns:
       - 8.8.8.8
       - 8.8.4.4
