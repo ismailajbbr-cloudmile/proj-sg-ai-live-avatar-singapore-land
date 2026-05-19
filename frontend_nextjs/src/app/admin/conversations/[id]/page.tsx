@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, Bot, UserRound, MessageSquare } from "lucide-react";
+import ReactMarkdown from "react-markdown";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 
 interface Message {
@@ -105,13 +106,24 @@ export default function ConversationDetailPage() {
                                 className={`flex max-w-[min(100%,28rem)] flex-col ${msg.role === "user" ? "items-end" : "items-start"}`}
                             >
                                 <div
-                                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed whitespace-pre-wrap ${
+                                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
                                         msg.role === "user"
-                                            ? "rounded-tr-sm bg-[#0a2240] text-white"
-                                            : "rounded-tl-sm border border-gray-100 bg-white text-[#1e293b] shadow-sm"
+                                            ? "rounded-tr-sm bg-[#0a2240] text-white whitespace-pre-wrap"
+                                            : "rounded-tl-sm border border-gray-100 bg-white text-[#1e293b] shadow-sm prose prose-sm max-w-none"
                                     }`}
                                 >
-                                    {msg.content}
+                                    {msg.role === "model" ? (
+                                        <ReactMarkdown
+                                            components={{
+                                                p: ({ node, ...props }) => <p className="m-0" {...props} />,
+                                                a: ({ node, ...props }) => <a className="text-[#0a2240] font-semibold hover:underline" {...props} />,
+                                            }}
+                                        >
+                                            {msg.content}
+                                        </ReactMarkdown>
+                                    ) : (
+                                        msg.content
+                                    )}
                                 </div>
                                 <p className="mx-1 mt-1 text-[11px] text-gray-400">{formatDate(msg.created_at)}</p>
                             </div>
