@@ -6,7 +6,7 @@ from datetime import datetime
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from auth.dependencies import require_admin
@@ -34,13 +34,25 @@ class UserResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
-@router.get("/", response_model=list[UserResponse])
+@router.get("/")
 async def list_users(
+    page: int = 1,
+    page_size: int = 10,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_admin),
 ):
-    result = await db.execute(select(User))
-    return result.scalars().all()
+    total = (await db.execute(select(func.count(User.id)))).scalar_one()
+    offset = (page - 1) * page_size
+    result = await db.execute(
+        select(User).order_by(User.created_at.desc()).offset(offset).limit(page_size)
+    )
+    users = result.scalars().all()
+    return {
+        "users": [UserResponse.model_validate(u).model_dump(mode="json") for u in users],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
 
 
 @router.post("/", status_code=201)

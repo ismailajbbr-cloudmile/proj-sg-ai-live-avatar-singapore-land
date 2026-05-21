@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback, useId } from "react";
-import { UserPlus, Copy, Check, KeyRound, Trash2, Users } from "lucide-react";
+import { UserPlus, Copy, Check, KeyRound, Trash2, Users, ChevronLeft, ChevronRight } from "lucide-react";
 import { AdminPageHeader } from "@/components/admin/AdminPageHeader";
 import { AdminDialog } from "@/components/admin/AdminDialog";
 
@@ -244,8 +244,12 @@ function ConfirmActionDialog({
     );
 }
 
+const PAGE_SIZE = 10;
+
 export default function UsersPage() {
     const [users, setUsers] = useState<User[]>([]);
+    const [total, setTotal] = useState(0);
+    const [page, setPage] = useState(1);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState("");
     const [showCreateModal, setShowCreateModal] = useState(false);
@@ -257,28 +261,34 @@ export default function UsersPage() {
     const [deletingId, setDeletingId] = useState<string | null>(null);
     const [resettingId, setResettingId] = useState<string | null>(null);
 
-    const fetchUsers = useCallback(async () => {
+    const fetchUsers = useCallback(async (p: number = page) => {
         setIsLoading(true);
         setError("");
         try {
-            const res = await fetch("/api/admin/users");
+            const res = await fetch(`/api/admin/users?page=${p}&page_size=${PAGE_SIZE}`);
             if (!res.ok) {
                 const data = await res.json().catch(() => ({}));
                 setError(data.detail || "Failed to load users");
                 return;
             }
             const data = await res.json();
-            setUsers(Array.isArray(data) ? data : (data.users ?? []));
+            const list = Array.isArray(data) ? data : (data.users ?? []);
+            const count = Array.isArray(data) ? data.length : (data.total ?? list.length);
+            setUsers(list);
+            setTotal(count);
+            if (!Array.isArray(data) && list.length === 0 && p > 1 && count > 0) {
+                setPage(p - 1);
+            }
         } catch {
             setError("Failed to load users");
         } finally {
             setIsLoading(false);
         }
-    }, []);
+    }, [page]);
 
     useEffect(() => {
-        void fetchUsers();
-    }, [fetchUsers]);
+        void fetchUsers(page);
+    }, [fetchUsers, page]);
 
     const runDelete = async () => {
         if (!confirm || confirm.kind !== "delete") return;
@@ -288,8 +298,13 @@ export default function UsersPage() {
         try {
             const res = await fetch(`/api/admin/users/${user.id}`, { method: "DELETE" });
             if (res.ok) {
-                setUsers((prev) => prev.filter((u) => u.id !== user.id));
                 setConfirm(null);
+                const remainingOnPage = users.length - 1;
+                if (remainingOnPage === 0 && page > 1) {
+                    setPage((p) => p - 1);
+                } else {
+                    void fetchUsers(page);
+                }
             } else {
                 const data = await res.json().catch(() => ({}));
                 setActionError(data.detail || "Failed to delete user");
@@ -340,13 +355,14 @@ export default function UsersPage() {
     };
 
     const busy = deletingId !== null || resettingId !== null;
+    const totalPages = Math.ceil(total / PAGE_SIZE);
 
     return (
         <div className="p-4 md:p-8">
             <AdminPageHeader
                 title="User Management"
                 description={
-                    isLoading ? "Loading…" : `${users.length} user${users.length !== 1 ? "s" : ""} total`
+                    isLoading ? "Loading…" : `${total} user${total !== 1 ? "s" : ""} total`
                 }
                 actions={
                     <button
@@ -375,7 +391,7 @@ export default function UsersPage() {
             {error && (
                 <div className="mb-6 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
                     {error}
-                    <button type="button" onClick={() => void fetchUsers()} className="ml-3 font-medium underline">
+                    <button type="button" onClick={() => void fetchUsers(page)} className="ml-3 font-medium underline">
                         Retry
                     </button>
                 </div>
@@ -384,7 +400,7 @@ export default function UsersPage() {
             <div className="overflow-hidden rounded-2xl border border-gray-100 bg-white shadow-sm">
                 {isLoading ? (
                     <div className="flex items-center justify-center py-20 text-sm text-gray-400">Loading users…</div>
-                ) : users.length === 0 ? (
+                ) : total === 0 ? (
                     <div className="flex flex-col items-center justify-center py-20 text-gray-400">
                         <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#f0f4f8] text-[#0a2240]">
                             <Users className="h-7 w-7" aria-hidden />
@@ -480,12 +496,39 @@ export default function UsersPage() {
                         </table>
                     </div>
                 )}
+                {!isLoading && total > 0 && totalPages > 1 && (
+                    <div className="flex items-center justify-between border-t border-gray-100 px-4 py-4 md:px-6">
+                        <span className="text-xs text-gray-500">
+                            Page {page} of {totalPages}
+                        </span>
+                        <div className="flex items-center gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                                disabled={page === 1}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-[#0a2240] hover:text-[#0a2240] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                <ChevronLeft className="h-3.5 w-3.5" aria-hidden />
+                                Prev
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                                disabled={page >= totalPages}
+                                className="inline-flex items-center gap-1 rounded-lg border border-gray-200 px-3 py-1.5 text-xs font-medium text-gray-600 transition-colors hover:border-[#0a2240] hover:text-[#0a2240] disabled:cursor-not-allowed disabled:opacity-40"
+                            >
+                                Next
+                                <ChevronRight className="h-3.5 w-3.5" aria-hidden />
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
 
             <CreateUserModal
                 open={showCreateModal}
                 onClose={() => setShowCreateModal(false)}
-                onSuccess={fetchUsers}
+                onSuccess={() => void fetchUsers(page)}
             />
             {resetPasswordModal && (
                 <PasswordModal
