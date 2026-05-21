@@ -97,7 +97,7 @@ function RankCell({ index }: { index: number }) {
     );
 }
 
-const PAGE_SIZE = 20;
+const PAGE_SIZE = 10;
 
 export default function AnalyticsPage() {
     const [data, setData] = useState<AnalyticsData | null>(null);

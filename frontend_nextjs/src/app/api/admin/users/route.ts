@@ -9,7 +9,10 @@ async function proxyJson(upstream: Response): Promise<Response> {
 
 export async function GET(req: Request) {
     const cookie = req.headers.get("cookie") ?? "";
-    const upstream = await fetch(`${BACKEND}/users/`, { headers: { "Cookie": cookie } });
+    const { searchParams } = new URL(req.url);
+    const page = searchParams.get("page") ?? "1";
+    const page_size = searchParams.get("page_size") ?? "10";
+    const upstream = await fetch(`${BACKEND}/users/?page=${page}&page_size=${page_size}`, { headers: { "Cookie": cookie } });
     return proxyJson(upstream);
 }
 

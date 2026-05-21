@@ -16,7 +16,7 @@ router = APIRouter()
 @router.get("")
 async def get_analytics(
     page: int = 1,
-    page_size: int = 20,
+    page_size: int = 10,
     db: AsyncSession = Depends(get_db),
     _: dict = Depends(require_admin),
 ):
