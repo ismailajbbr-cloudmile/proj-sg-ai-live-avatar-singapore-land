@@ -27,14 +27,15 @@ class Settings(BaseSettings):
     google_application_credentials: str = "/app/credentials/gcp-key.json"
     next_public_origin: str = "http://localhost:3000"
 
-    session_idle_timeout_minutes: int = 1
+    session_idle_timeout_minutes: int = 4
 
     tts_model: str = "gemini-2.5-flash-tts"
     tts_voice_name: str = "Achernar"
     tts_voice_prompt: str = """
-        Speak in a warm, professional tone using clear and neutral tone.
-        Avoid strong regional accents.
-        Sound welcoming and natural, like a hospitality professional at a premium mall
+            You are a bilingual English-Mandarin voice assistant with a friendly.
+            Speak warmly with a natural Singaporean accent.
+            Use only the user’s input language: English for English input and standard Mandarin for Chinese input.
+            Do not mix languages unless explicitly requested.
         """
 
 
