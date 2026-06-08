@@ -22,6 +22,8 @@ class Settings(BaseSettings):
     vertex_ai_web_datastore_id: str = ""
     vertex_ai_pdf_datastore_id: str = ""
 
+    gemini_chat_model: str = "gemini-2.5-flash"
+
     google_application_credentials: str = "/app/credentials/gcp-key.json"
     next_public_origin: str = "http://localhost:3000"
 
@@ -29,10 +31,11 @@ class Settings(BaseSettings):
 
     tts_model: str = "gemini-2.5-flash-tts"
     tts_voice_name: str = "Achernar"
-    tts_voice_prompt: str = (
-        "Read aloud in a warm, welcoming tone with a Singaporean accent. "
-        "Speak naturally and conversationally."
-    )
+    tts_voice_prompt: str = """
+        Speak in a warm, professional tone using clear and neutral tone.
+        Avoid strong regional accents.
+        Sound welcoming and natural, like a hospitality professional at a premium mall
+        """
 
 
 settings = Settings()

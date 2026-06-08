@@ -80,6 +80,7 @@ jobs:
             printf 'TTS_MODEL=%s\n' \"\$(gcloud secrets versions access latest --secret='TTS_MODEL')\" >> .env
             printf 'TTS_VOICE_NAME=%s\n' \"\$(gcloud secrets versions access latest --secret='TTS_VOICE_NAME')\" >> .env
             printf 'NEXT_PUBLIC_ORIGIN=%s\n' \"\$(gcloud secrets versions access latest --secret='NEXT_PUBLIC_ORIGIN')\" >> .env
+            printf 'GEMINI_CHAT_MODEL=%s\n' \"\$(gcloud secrets versions access latest --secret='GEMINI_CHAT_MODEL')\" >> .env
 
             # Decode base64 GCP service account key to JSON file for Docker volume mount
             gcloud secrets versions access latest --secret='AVATAR_CHATBOT_JSON_KEY' | base64 -d > avatar-chatbot-key.json
