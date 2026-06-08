@@ -1,6 +1,7 @@
 "use client";
 
 import { AdminDialog } from "@/components/admin/AdminDialog";
+import { getLocaleStrings } from "@/lib/locale";
 
 const WARNING_SECONDS = 30;
 
@@ -8,12 +9,14 @@ interface IdleWarningModalProps {
     open: boolean;
     /** Current countdown value (counts down from WARNING_SECONDS to 0) */
     countdownSeconds: number;
+    locale: string;
     onStayActive: () => void;
     onNewSession: () => void;
 }
 
-export function IdleWarningModal({ open, countdownSeconds, onStayActive, onNewSession }: IdleWarningModalProps) {
+export function IdleWarningModal({ open, countdownSeconds, locale, onStayActive, onNewSession }: IdleWarningModalProps) {
     const progressPct = Math.max(0, (countdownSeconds / WARNING_SECONDS) * 100);
+    const strings = getLocaleStrings(locale).idle;
 
     return (
         <AdminDialog open={open} onClose={onStayActive} labelledBy="idle-warning-title">
@@ -28,12 +31,10 @@ export function IdleWarningModal({ open, countdownSeconds, onStayActive, onNewSe
                         </svg>
                     </div>
                     <h2 id="idle-warning-title" className="text-xl font-bold text-[#0a2240]">
-                        Still there?
+                        {strings.title}
                     </h2>
                     <p className="text-sm text-gray-500">
-                        This session will end in{" "}
-                        <span className="font-semibold text-[#0a2240] tabular-nums">{countdownSeconds}</span>{" "}
-                        second{countdownSeconds !== 1 ? "s" : ""} due to inactivity.
+                        {strings.countdown(countdownSeconds)}
                     </p>
                 </div>
 
@@ -52,14 +53,14 @@ export function IdleWarningModal({ open, countdownSeconds, onStayActive, onNewSe
                         onClick={onStayActive}
                         className="w-full rounded-xl bg-[#0a2240] py-3 text-sm font-semibold text-white hover:bg-[#0d2d54] active:scale-[0.98] transition-all"
                     >
-                        I&apos;m Still Here
+                        {strings.stay}
                     </button>
                     <button
                         type="button"
                         onClick={onNewSession}
                         className="w-full rounded-xl border border-gray-200 bg-white py-3 text-sm font-semibold text-gray-600 hover:bg-gray-50 active:scale-[0.98] transition-all"
                     >
-                        Start New Session
+                        {strings.newSession}
                     </button>
                 </div>
             </div>

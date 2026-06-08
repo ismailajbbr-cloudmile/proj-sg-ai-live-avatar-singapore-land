@@ -45,6 +45,7 @@ class ChatRequest(BaseModel):
     message: str
     history: list[dict] = []
     conversation_id: uuid.UUID | None = None
+    language: str = "en-US"
 
 
 @router.post("/chat")
@@ -59,6 +60,7 @@ async def chat(
     message: str = body.message
     conversation_id: uuid.UUID | None = body.conversation_id
     history: list[dict] = body.history
+    language: str = body.language
 
     async def generate():
         nonlocal conversation_id
@@ -141,7 +143,7 @@ async def chat(
                 yield sse({"type": "conversation_id", "value": conv_id_str})
 
             try:
-                async for chunk_text in stream_gemini_response(message, gemini_history):
+                async for chunk_text in stream_gemini_response(message, gemini_history, language=language):
                     if not gesture_emitted:
                         line_buffer += chunk_text
                         newline_idx = line_buffer.find("\n")

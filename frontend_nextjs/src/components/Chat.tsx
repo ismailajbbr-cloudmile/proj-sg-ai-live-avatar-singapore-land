@@ -3,6 +3,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
+import { getLocaleStrings } from "@/lib/locale";
 import ReactMarkdown from "react-markdown";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
 
@@ -30,6 +31,8 @@ interface ChatProps {
   onThinkingChange?: (thinking: boolean) => void;
   /** Ref the parent populates; Chat writes a handler here to receive speech-ended events */
   speechEndCallbackRef?: React.MutableRefObject<(() => void) | null>;
+  /** False until parent reads sessionStorage locale after mount (avoids SSR hydration mismatch) */
+  localeReady?: boolean;
 }
 
 declare global {
@@ -38,13 +41,6 @@ declare global {
     SpeechRecognition: any;
   }
 }
-
-const LANGUAGE_NAMES: Record<string, string> = {
-  "en-US": "English (US)",
-  "zh-CN": "中文 (简体)",
-  "zh-TW": "中文 (繁體)",
-  "zh-HK": "中文 (香港)",
-};
 
 function formatTime(date: Date): string {
   const hours = date.getHours().toString().padStart(2, "0");
@@ -58,42 +54,35 @@ function getAvailableLanguages(language?: string | string[]): string[] {
   return [language];
 }
 
-function getLanguageName(lang: string): string {
-  return LANGUAGE_NAMES[lang] || lang;
-}
-
 /**
  * Strips markdown and expands common abbreviations so the TTS engine reads it naturally.
  */
-function cleanTextForTTS(text: string): string {
+function cleanTextForTTS(text: string, language: string): string {
   let cleaned = text;
 
   // 1. Remove Markdown formatting
-  // Remove bold/italic (* or _)
   cleaned = cleaned.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1");
-  // Remove inline code (`)
   cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
-  // Remove links [text](url) -> text
   cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-  // Remove headings (#)
   cleaned = cleaned.replace(/^#+\s+/gm, "");
 
   // 2. Strip internal markers
   cleaned = cleaned.replace(/\[SHOW_QR\]/gi, "");
 
-  // 3. Expand common abbreviations
-  cleaned = cleaned.replace(/\be\.g\./gi, "for example");
-  cleaned = cleaned.replace(/\bi\.e\./gi, "that is");
-  cleaned = cleaned.replace(/\betc\./gi, "and so on");
+  // 3. Expand common abbreviations (English only)
+  if (!language.startsWith("zh")) {
+    cleaned = cleaned.replace(/\be\.g\./gi, "for example");
+    cleaned = cleaned.replace(/\bi\.e\./gi, "that is");
+    cleaned = cleaned.replace(/\betc\./gi, "and so on");
+  }
 
   return cleaned.trim();
 }
 
-/** Splits buffer on sentence boundaries (.?!) followed by whitespace.
- *  Returns complete sentences and the remaining partial sentence. */
+/** Splits buffer on sentence boundaries (.?! and 。！？) followed by optional whitespace. */
 function extractSentences(buffer: string): { sentences: string[]; rest: string } {
   const sentences: string[] = [];
-  const regex = /[.?!]+\s+/g;
+  const regex = /[.?!。！？]+\s*/g;
   let lastIndex = 0;
   let match;
   while ((match = regex.exec(buffer)) !== null) {
@@ -125,12 +114,14 @@ export default function Chat({
   onRecordingStatusChange,
   onThinkingChange,
   speechEndCallbackRef,
+  localeReady = false,
 }: ChatProps) {
   const router = useRouter();
-  const [messages, setMessages] = useState<Message[]>([
+  const initialLang = getAvailableLanguages(language)[0];
+  const [messages, setMessages] = useState<Message[]>(() => [
     {
       id: 1,
-      text: `Welcome to Marina Square. I'm your ${avatarName}. How can I assist you today?`,
+      text: getLocaleStrings(initialLang).chat.welcome(avatarName),
       sender: "bot",
       timestamp: new Date(),
     },
@@ -161,6 +152,18 @@ export default function Chat({
   const availableLanguages = getAvailableLanguages(language);
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
   const currentLanguage = availableLanguages[currentLanguageIndex];
+  const localeStrings = getLocaleStrings(currentLanguage);
+  const welcomeSpokenRef = useRef(false);
+
+  useEffect(() => {
+    setMessages((prev) => {
+      if (prev.length !== 1 || prev[0].id !== 1 || prev[0].sender !== "bot") return prev;
+      return [{
+        ...prev[0],
+        text: getLocaleStrings(currentLanguage).chat.welcome(avatarName),
+      }];
+    });
+  }, [currentLanguage, avatarName]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -235,17 +238,35 @@ export default function Chat({
     drainTtsQueue();
   }, [fetchTtsSegment, drainTtsQueue]);
 
+  // Speak welcome message when session opens (does not block user input)
+  useEffect(() => {
+    if (!localeReady || welcomeSpokenRef.current || !onBotSpeech) return;
+    welcomeSpokenRef.current = true;
+    const welcomeText = getLocaleStrings(currentLanguage).chat.welcome(avatarName);
+    enqueueTts(cleanTextForTTS(welcomeText, currentLanguage), "idle");
+  }, [localeReady, onBotSpeech, avatarName, currentLanguage, enqueueTts]);
+
   // ── Chat logic ────────────────────────────────────────────────────────────
   const handleSend = async (textToSend?: string) => {
     const text = textToSend || input;
     if (!text.trim() || isThinking) return;
 
-    // If avatar is currently speaking, queue the message and wait
+    // Voice/PTT input interrupts current speech; typed input while speaking is queued
     if (isAvatarSpeakingRef.current) {
-      pendingMessageQueueRef.current.push(text);
-      setQueuedMessageCount(pendingMessageQueueRef.current.length);
-      if (!textToSend) setInput("");
-      return;
+      if (textToSend) {
+        onClearSpeech?.();
+        pendingTtsRef.current = [];
+        ttsDrainRunningRef.current = false;
+        ttsActiveFetchesRef.current = 0;
+        setIsTtsBusy(false);
+        isAvatarSpeakingRef.current = false;
+        pendingMessageQueueRef.current = [];
+        setQueuedMessageCount(0);
+      } else {
+        pendingMessageQueueRef.current.push(text);
+        setQueuedMessageCount(pendingMessageQueueRef.current.length);
+        return;
+      }
     }
 
     const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
@@ -266,7 +287,12 @@ export default function Chat({
       const res = await fetch("/api/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: text, history, conversation_id: conversationIdRef.current }),
+        body: JSON.stringify({
+          message: text,
+          history,
+          conversation_id: conversationIdRef.current,
+          language: currentLanguage,
+        }),
       });
 
       if (!res.ok) {
@@ -328,23 +354,28 @@ export default function Chat({
               const { sentences, rest } = extractSentences(sentenceBuffer);
               sentenceBuffer = rest;
               for (const sentence of sentences) {
-                const cleaned = cleanTextForTTS(sentence);
+                const cleaned = cleanTextForTTS(sentence, currentLanguage);
                 if (cleaned) enqueueTts(cleaned, gesture);
               }
             } else if (parsed.type === "done") {
               setIsThinking(false);
               if (!messageAdded) {
-                setMessages((prev) => [...prev, { id: botMessageId, text: fullText || "Sorry, I am having trouble responding right now.", sender: "bot", timestamp: new Date() }]);
+                setMessages((prev) => [...prev, {
+                  id: botMessageId,
+                  text: fullText || localeStrings.chat.errorEmpty,
+                  sender: "bot",
+                  timestamp: new Date(),
+                }]);
               }
               // Flush any remaining text that didn't end with punctuation
               const remaining = sentenceBuffer.trim();
-              if (remaining) enqueueTts(cleanTextForTTS(remaining), gesture);
+              if (remaining) enqueueTts(cleanTextForTTS(remaining, currentLanguage), gesture);
               // Show QR and speak the prompt when marker was detected
               if (showQrDetected) {
                 setMessages((prev) =>
                   prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
                 );
-                enqueueTts("You can scan this QR code for detailed directions and information.", gesture);
+                enqueueTts(localeStrings.chat.qrTts, gesture);
               }
             } else if (parsed.type === "show_qr") {
               setMessages((prev) =>
@@ -363,7 +394,7 @@ export default function Chat({
       setIsThinking(false);
       setMessages((prev) => [...prev, {
         id: messageIdRef.current++,
-        text: "I'm sorry, there was a system error when trying to respond.",
+        text: localeStrings.chat.errorSystem,
         sender: "bot",
         timestamp: new Date(),
       }]);
@@ -453,15 +484,15 @@ export default function Chat({
     <div className="flex h-full flex-col bg-white">
       {/* ── Header ── */}
       <div className="flex items-center justify-between px-6 py-5 border-b border-gray-100 shadow-sm z-10">
-        <span className="text-base font-bold text-[#0a2240] flex-shrink-0">Conversation</span>
+        <span className="text-base font-bold text-[#0a2240] flex-shrink-0">{localeStrings.chat.header}</span>
         <div className="flex items-center gap-2 min-w-0">
           {queuedMessageCount > 0 && (
             <span className="text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-full px-2 py-0.5 whitespace-nowrap flex-shrink-0">
-              {queuedMessageCount} waiting
+              {localeStrings.chat.waiting(queuedMessageCount)}
             </span>
           )}
           {isTtsBusy && (
-            <span className="text-xs text-gray-400 animate-pulse whitespace-nowrap flex-shrink-0">Speaking…</span>
+            <span className="text-xs text-gray-400 animate-pulse whitespace-nowrap flex-shrink-0">{localeStrings.chat.speaking}</span>
           )}
           {onClose && (
             <button
@@ -506,7 +537,7 @@ export default function Chat({
                     </p>
                     {message.showQr && (
                       <div className="mt-3 ml-1">
-                        <p className="text-[11px] text-gray-500 mb-1.5">You can scan this QR for detailed information:</p>
+                        <p className="text-[11px] text-gray-500 mb-1.5">{localeStrings.chat.qrCaption}</p>
                         <img
                           src="/qrcode.svg"
                           alt="Location QR Code"
@@ -556,7 +587,7 @@ export default function Chat({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleSend()}
-            placeholder={isThinking ? "AI is thinking..." : "Type your message..."}
+            placeholder={isThinking ? localeStrings.chat.thinking : localeStrings.chat.placeholder}
             disabled={isThinking}
             className="flex-1 bg-transparent px-2 text-[15px] text-[#0a2240] placeholder-gray-400 focus:outline-none disabled:opacity-50"
           />
@@ -583,7 +614,7 @@ export default function Chat({
         </div>
 
         <p className="mt-3 text-center text-[10px] font-medium text-gray-400">
-          Powered by CloudMile &bull; Your privacy is protected
+          {localeStrings.chat.privacy}
         </p>
       </div>
     </div>

@@ -16,11 +16,31 @@ def _create_client() -> texttospeech.TextToSpeechClient:
     return texttospeech.TextToSpeechClient()
 
 
+def _segment_words(text: str, language: str) -> list[str]:
+    stripped = text.strip()
+    if not stripped:
+        return []
+    if language.startswith("zh"):
+        return [ch for ch in stripped if not ch.isspace()]
+    return [w for w in stripped.split() if w]
+
+
+def _tts_language_code(language: str) -> str:
+    """Map app locale codes to Google Cloud Gemini TTS BCP-47 codes."""
+    normalized = language.replace("_", "-").lower()
+    if normalized in ("zh-cn", "zh"):
+        return "cmn-CN"
+    if normalized in ("zh-tw", "zh-hk"):
+        return "cmn-tw"
+    return language
+
+
 async def synthesize(text: str, language: str = "en-US") -> dict:
-    words = [w for w in text.strip().split() if w]
+    words = _segment_words(text, language)
     if not words:
         raise ValueError("text is required")
 
+    tts_language = _tts_language_code(language)
     client = _create_client()
 
     request = texttospeech.SynthesizeSpeechRequest(
@@ -29,7 +49,7 @@ async def synthesize(text: str, language: str = "en-US") -> dict:
             prompt=settings.tts_voice_prompt,
         ),
         voice=texttospeech.VoiceSelectionParams(
-            language_code=language,
+            language_code=tts_language,
             name=settings.tts_voice_name,
             model_name=settings.tts_model,
         ),
@@ -49,7 +69,7 @@ async def synthesize(text: str, language: str = "en-US") -> dict:
 
     # Gemini TTS returns no timepoints — viseme timing is linearly estimated
     visemes = build_viseme_frames(words, [])
-    print(f"[TTS] Gemini ({settings.tts_model}/{settings.tts_voice_name}) words={len(words)}")
+    print(f"[TTS] Gemini ({settings.tts_model}/{settings.tts_voice_name}) lang={tts_language} words={len(words)}")
 
     return {
         "audioBase64": audio_base64,
