@@ -9,6 +9,7 @@ import { useIdleReset } from "@/hooks/useIdleReset";
 import { IdleWarningModal } from "@/components/IdleWarningModal";
 import { IdleIndicator } from "@/components/IdleIndicator";
 import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
+import { DEFAULT_LOCALE, getLocaleStrings, readStoredLocale } from "@/lib/locale";
 
 // Page Name: Chat (In-call)
 // Route: /chat
@@ -75,7 +76,8 @@ export default function ChatPage() {
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isPttPressed, setIsPttPressed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
-  const [lang, setLang] = useState("en-US");
+  const [lang, setLang] = useState(DEFAULT_LOCALE);
+  const [localeReady, setLocaleReady] = useState(false);
   const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
   const [idleWarningOpen, setIdleWarningOpen] = useState(false);
   const [warningCountdown, setWarningCountdown] = useState(30);
@@ -162,9 +164,11 @@ export default function ChatPage() {
   }, []);
 
   useEffect(() => {
-    const stored = sessionStorage.getItem("selectedLang");
-    if (stored) setLang(stored);
+    setLang(readStoredLocale());
+    setLocaleReady(true);
   }, []);
+
+  const localeStrings = getLocaleStrings(lang);
 
   // ── RAF ticker ─────────────────────────────────────────────────────────────
   const stopRaf = useCallback(() => {
@@ -354,7 +358,7 @@ export default function ChatPage() {
                 className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md px-4 py-2 text-sm font-medium text-[#0a2240] shadow-md border border-white/50 hover:bg-white transition-colors"
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 18l8.5-6L6 6v12zm2-8.14L11.03 12 8 14.14V9.86zM16 6h2v12h-2z"/></svg>
-                Next
+                {localeStrings.chatPage.skipNext}
               </button>
             )}
             <button
@@ -362,7 +366,7 @@ export default function ChatPage() {
               className="flex items-center gap-2 rounded-full bg-white/90 backdrop-blur-md px-4 py-2 text-sm font-medium text-[#0a2240] shadow-md border border-white/50 hover:bg-white transition-colors"
             >
               <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M6 6h2v12H6zm3.5 6l8.5 6V6zm2 0l4.5 3.14V9.86L11.5 12z"/><rect x="16" y="6" width="2" height="12"/></svg>
-              Skip All
+              {localeStrings.chatPage.skipAll}
             </button>
           </div>
         )}
@@ -399,7 +403,7 @@ export default function ChatPage() {
           >
             {showThinkingChrome && (
               <span className="sr-only" aria-live="polite">
-                AI is thinking, please wait
+                {localeStrings.chatPage.thinkingSr}
               </span>
             )}
             <div
@@ -411,7 +415,7 @@ export default function ChatPage() {
 
               <button
                 type="button"
-                aria-label={isRecording ? "Listening, release to send" : "Push to talk — hold to speak"}
+                aria-label={isRecording ? localeStrings.chatPage.pttListening : localeStrings.chatPage.pttHold}
                 onMouseDown={() => setIsPttPressed(true)}
                 onMouseUp={() => setIsPttPressed(false)}
                 onMouseLeave={() => setIsPttPressed(false)}
@@ -429,7 +433,7 @@ export default function ChatPage() {
                       <div className="w-2 h-2 md:w-2.5 md:h-2.5 bg-white rounded-full animate-bounce [animation-delay:-0.15s]"></div>
                       <div className="w-2 h-2 md:w-2.5 md:h-2.5 bg-white rounded-full animate-bounce"></div>
                     </div>
-                    <span className="truncate max-sm:text-xs">Listening...</span>
+                    <span className="truncate max-sm:text-xs">{localeStrings.chatPage.pttListeningShort}</span>
                   </>
                 ) : (
                   <>
@@ -438,9 +442,9 @@ export default function ChatPage() {
                       <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" />
                       <line x1="8" y1="23" x2="16" y2="23" />
                     </svg>
-                    <span className="max-sm:sr-only sm:inline whitespace-nowrap">Push to Talk</span>
+                    <span className="max-sm:sr-only sm:inline whitespace-nowrap">{localeStrings.chatPage.pttHoldShort}</span>
                     <span className="sm:hidden whitespace-nowrap" aria-hidden>
-                      Talk
+                      {localeStrings.chatPage.pttTalkShort}
                     </span>
                   </>
                 )}
@@ -454,20 +458,20 @@ export default function ChatPage() {
 
               <div className="w-px h-8 md:h-10 bg-gray-200 flex-shrink-0 mx-0.5 md:mx-1" />
 
-              <ToolbarBtn active={isChatOpen} onClick={() => setIsChatOpen((p) => !p)} label="Chat">
+              <ToolbarBtn active={isChatOpen} onClick={() => setIsChatOpen((p) => !p)} label={localeStrings.chatPage.toolbarChat}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>
               </ToolbarBtn>
 
-              <ToolbarBtn active={captionsOn} onClick={() => setCaptionsOn((p) => !p)} label="Captions">
+              <ToolbarBtn active={captionsOn} onClick={() => setCaptionsOn((p) => !p)} label={localeStrings.chatPage.toolbarCaptions}>
                 <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <rect x="2" y="4" width="20" height="16" rx="2" />
                   <path d="M7 12h2m4 0h4M7 16h8" />
                 </svg>
               </ToolbarBtn>
 
-              <ToolbarBtn danger onClick={handleHangUp} label="End call">
+              <ToolbarBtn danger onClick={handleHangUp} label={localeStrings.chatPage.toolbarEndCall}>
                 <svg width="24" height="24" viewBox="0 0 24 24" fill="currentColor">
                   <path d="M6.62 10.79a15.05 15.05 0 006.59 6.59l2.2-2.2a1 1 0 011.01-.24c1.12.37 2.32.57 3.58.57a1 1 0 011 1V20a1 1 0 01-1 1C10.61 21 3 13.39 3 4a1 1 0 011-1h3.5a1 1 0 011 1c0 1.26.2 2.46.57 3.58a1 1 0 01-.25 1.01l-2.2 2.2z" />
                 </svg>
@@ -491,6 +495,7 @@ export default function ChatPage() {
             onBotSpeech={handleBotSpeech}
             onClearSpeech={clearSpeech}
             language={lang}
+            localeReady={localeReady}
             onClose={() => setIsChatOpen(false)}
             avatarName="Marina Square AI Concierge"
             isPttHoveredOrPressed={isPttPressed}
@@ -504,6 +509,7 @@ export default function ChatPage() {
       <IdleWarningModal
         open={idleWarningOpen}
         countdownSeconds={warningCountdown}
+        locale={lang}
         onStayActive={() => { setIdleWarningOpen(false); manualResume(); }}
         onNewSession={() => router.push("/")}
       />

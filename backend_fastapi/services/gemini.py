@@ -45,9 +45,49 @@ The QR code links to an INDOOR wayfinder map of Marina Square. It is ONLY useful
 Append exactly "[SHOW_QR]" on its own new line at the very end of your response ONLY when the user asks how to find or get to a specific store, restaurant, facility, exit, or floor INSIDE Marina Square.
 Do NOT append "[SHOW_QR]" for:
 - Questions about getting TO Marina Square from outside (e.g. "How to get to Marina Square from Changi?")
-- General information about stores, events, promotions, opening hours, or parking
-- Questions about places outside Marina Square
-- Any question that does not require indoor navigation within the building"""
+- General information only (hours, promotions, menu) when the user is NOT asking for directions — still append "[SHOW_QR]" when they ask how to find or get to a tenant, including OUTSIDE
+- Questions about destinations outside Marina Square (other buildings, streets, or cities) — NOT tenants whose name contains "outside" or outdoor seating within the mall
+- Any question that does not require indoor navigation within the building
+
+Disambiguating the store named "OUTSIDE":
+- OUTSIDE is a store/tenant located INSIDE Marina Square. It is NOT a request to leave the mall.
+- When the user mentions "OUTSIDE" (any casing) while looking for a shop, restaurant, or tenant, treat it as in-mall wayfinding and append "[SHOW_QR]" when giving directions or location.
+- Do NOT interpret the store name OUTSIDE as "outside the building."
+
+Chinese (简体中文) — OUTSIDE store vs leaving the mall:
+- Visitors often refer to the OUTSIDE tenant as OUTSIDE、OUTSIDE店、OUTSIDE商店, or 外面 when asking where a shop is.
+- In a Marina Square kiosk session, questions like 外面在哪里、怎么去外面、OUTSIDE在哪里、哪里有OUTSIDE店 usually mean the IN-MALL store named OUTSIDE → give directions and append [SHOW_QR].
+- Do NOT treat 外面 in these store-finding questions as "exit the building" or "go outdoors."
+- ONLY treat as leaving the mall when the user clearly means exit/travel away, e.g. 离开商场、走出商场、出口在哪里、怎么出去、从樟宜到滨海广场、滨海广场外面的餐厅 — no [SHOW_QR] unless asking for a specific in-mall exit.
+
+Examples that SHOULD append "[SHOW_QR]" (OUTSIDE store wayfinding):
+- "Where is OUTSIDE?" → Directions to the OUTSIDE store, then [SHOW_QR]
+- "How do I get to Outside?" → In-mall navigation to the store, NOT mall exit instructions, then [SHOW_QR]
+- "OUTSIDE 在哪里？" / "外面在哪里？" / "怎么去 OUTSIDE 店？" → Chinese directions to the store, then [SHOW_QR]
+
+Examples that must NOT be treated as the OUTSIDE store (no [SHOW_QR] unless asking for a specific in-mall exit):
+- "How do I get outside?" / "Where is the exit?" / "怎么出去？" / "出口在哪里？" → Mall exit guidance only
+- "How do I get to Marina Square from Changi?" / "从樟宜怎么到滨海广场？" → External travel directions
+- "Restaurants outside Marina Square" / "滨海广场外面的餐厅" → Off-premise destinations"""
+
+
+def _session_language_instruction(language: str) -> str:
+    if language.startswith("zh"):
+        return (
+            "Respond in Simplified Chinese (简体中文) for this entire session "
+            "unless the user explicitly asks to switch to English.\n"
+            "OUTSIDE store rule (Chinese): If the user asks about 外面、OUTSIDE、或 OUTSIDE店 "
+            "in a directions or location question, they mean the tenant store OUTSIDE inside "
+            "Marina Square — not leaving the mall. Give in-mall directions and append [SHOW_QR]."
+        )
+    return (
+        "Respond in English for this entire session "
+        "unless the user explicitly asks to switch to Chinese."
+    )
+
+
+def _build_system_instruction(language: str = "en-US") -> str:
+    return f"{SYSTEM_INSTRUCTION.strip()}\n\n{_session_language_instruction(language)}"
 
 
 def _datastore_path(datastore_id: str) -> str:
@@ -74,9 +114,10 @@ def _is_gemini_3_family(model: str) -> bool:
 def _build_generate_config(
     grounding_tools: list[types.Tool],
     model: str,
+    language: str = "en-US",
 ) -> types.GenerateContentConfig:
     kwargs: dict = {
-        "system_instruction": SYSTEM_INSTRUCTION,
+        "system_instruction": _build_system_instruction(language),
         "tools": grounding_tools if grounding_tools else None,
     }
     if _is_gemini_3_family(model):
@@ -105,6 +146,7 @@ def _chunk_visible_text(chunk: types.GenerateContentResponse) -> str:
 async def stream_gemini_response(
     message: str,
     history: list[dict],
+    language: str = "en-US",
 ) -> AsyncIterator[str]:
     client = _get_client()
     model = settings.gemini_chat_model
@@ -139,7 +181,7 @@ async def stream_gemini_response(
     stream = await client.aio.models.generate_content_stream(
         model=model,
         contents=contents,
-        config=_build_generate_config(grounding_tools, model),
+        config=_build_generate_config(grounding_tools, model, language),
     )
 
     started_at = time.monotonic()
