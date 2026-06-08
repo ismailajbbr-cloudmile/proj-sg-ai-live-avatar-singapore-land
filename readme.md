@@ -51,6 +51,7 @@ cp .env.example .env
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login credentials |
 | `GOOGLE_VERTEX_PROJECT` | GCP project ID |
 | `GOOGLE_VERTEX_LOCATION` | GCP region (default: `us-central1`) |
+| `GEMINI_CHAT_MODEL` | Vertex chat model (default: `gemini-2.5-flash`; use `gemini-3.5-flash` for 3.5) |
 | `VERTEX_AI_WEB_DATASTORE_ID` | Vertex AI Search datastore (website content) |
 | `VERTEX_AI_PDF_DATASTORE_ID` | Vertex AI Search datastore (PDFs) |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | Kiosk idle timeout in minutes |
