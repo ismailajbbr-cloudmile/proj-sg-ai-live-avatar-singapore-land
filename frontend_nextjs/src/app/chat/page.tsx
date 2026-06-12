@@ -94,7 +94,7 @@ export default function ChatPage() {
 
   // Closed captions
   const [captionText, setCaptionText] = useState("");
-  const [captionsOn, setCaptionsOn] = useState(false);
+  const [captionsOn, setCaptionsOn] = useState(true);
 
   // Audio queue for sentence-by-sentence playback
   type AudioSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture; text: string };
@@ -421,7 +421,7 @@ export default function ChatPage() {
                 onMouseLeave={() => setIsPttPressed(false)}
                 onTouchStart={(e) => { e.preventDefault(); setIsPttPressed(true); }}
                 onTouchEnd={(e) => { e.preventDefault(); setIsPttPressed(false); }}
-                className={`flex items-center justify-center gap-2 md:gap-3 rounded-full px-4 sm:px-6 md:px-8 h-12 md:h-14 font-bold text-sm sm:text-base md:text-[17px] tracking-wide transition-all shadow-xl select-none relative overflow-hidden group shrink min-w-0 ${isPttPressed || isRecording
+                className={`flex items-center justify-center gap-2 md:gap-3 rounded-full px-4 sm:px-6 md:px-8 h-12 md:h-14 font-bold text-xs sm:text-sm md:text-base lg:text-[17px] tracking-wide transition-all shadow-xl select-none relative overflow-hidden group shrink min-w-0 ${isPttPressed || isRecording
                     ? "bg-red-500 text-white scale-95"
                     : "bg-gradient-to-r from-[#2323a8] to-[#00b5ad] text-white hover:scale-105 active:scale-95"
                   }`}
@@ -442,8 +442,8 @@ export default function ChatPage() {
                       <path d="M19 10v2a7 7 0 0 1-14 0v-2" /><line x1="12" y1="19" x2="12" y2="23" />
                       <line x1="8" y1="23" x2="16" y2="23" />
                     </svg>
-                    <span className="max-sm:sr-only sm:inline whitespace-nowrap">{localeStrings.chatPage.pttHoldShort}</span>
-                    <span className="sm:hidden whitespace-nowrap" aria-hidden>
+                    <span className="max-sm:sr-only sm:inline whitespace-nowrap truncate">{localeStrings.chatPage.pttHoldShort}</span>
+                    <span className="sm:hidden whitespace-nowrap truncate" aria-hidden>
                       {localeStrings.chatPage.pttTalkShort}
                     </span>
                   </>

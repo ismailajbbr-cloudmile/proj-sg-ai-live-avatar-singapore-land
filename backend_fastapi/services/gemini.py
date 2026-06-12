@@ -4,7 +4,9 @@ Vertex AI Gemini streaming client — Python port of frontend_nextjs/src/app/api
 
 import logging
 import time
+from datetime import datetime
 from typing import AsyncIterator
+from zoneinfo import ZoneInfo
 
 from google import genai
 from google.genai import types
@@ -68,7 +70,13 @@ Examples that SHOULD append "[SHOW_QR]" (OUTSIDE store wayfinding):
 Examples that must NOT be treated as the OUTSIDE store (no [SHOW_QR] unless asking for a specific in-mall exit):
 - "How do I get outside?" / "Where is the exit?" / "怎么出去？" / "出口在哪里？" → Mall exit guidance only
 - "How do I get to Marina Square from Changi?" / "从樟宜怎么到滨海广场？" → External travel directions
-- "Restaurants outside Marina Square" / "滨海广场外面的餐厅" → Off-premise destinations"""
+- "Restaurants outside Marina Square" / "滨海广场外面的餐厅" → Off-premise destinations
+
+Formatting for chat display (use markdown in your spoken response text):
+- Use **bold** for store names, promo titles, and key dates.
+- When listing 3+ stores, deals, or events, use a markdown bullet list (- item).
+- Put a blank line between sections (intro, deal list, membership info).
+- Do NOT use # headings or code blocks."""
 
 
 def _session_language_instruction(language: str) -> str:
@@ -86,8 +94,21 @@ def _session_language_instruction(language: str) -> str:
     )
 
 
+def _promo_event_rules() -> str:
+    today = datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y-%m-%d")
+    return f"""Promotions and events (today is {today}, Asia/Singapore):
+- When the user asks about promotions, deals, or events, only mention items that are CURRENT or UPCOMING as of today.
+- Do NOT mention expired, past, or ended promotions/events unless the user explicitly asks about history.
+- If grounding sources include date ranges, compare against today and exclude anything that has already ended.
+- If no current/upcoming items are found, say you don't have current promotion/event details and suggest checking Marina Square's website or information counter."""
+
+
 def _build_system_instruction(language: str = "en-US") -> str:
-    return f"{SYSTEM_INSTRUCTION.strip()}\n\n{_session_language_instruction(language)}"
+    return (
+        f"{SYSTEM_INSTRUCTION.strip()}\n\n"
+        f"{_promo_event_rules()}\n\n"
+        f"{_session_language_instruction(language)}"
+    )
 
 
 def _datastore_path(datastore_id: str) -> str:
