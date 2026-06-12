@@ -100,10 +100,10 @@ const STRINGS: Record<Locale, LocaleStrings> = {
     },
     chatPage: {
       pttListening: "Listening, release to send",
-      pttHold: "Push to talk — hold to speak",
+      pttHold: "Push and hold to talk — release to send",
       pttListeningShort: "Listening...",
-      pttHoldShort: "Push to Talk",
-      pttTalkShort: "Talk",
+      pttHoldShort: "Push & Hold to Talk",
+      pttTalkShort: "Hold to Talk",
       thinkingSr: "AI is thinking, please wait",
       toolbarChat: "Chat",
       toolbarCaptions: "Captions",

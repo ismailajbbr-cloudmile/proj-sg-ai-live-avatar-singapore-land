@@ -54,22 +54,49 @@ function getAvailableLanguages(language?: string | string[]): string[] {
   return [language];
 }
 
+const GESTURE_PREFIX_RE = /^(idle|nod|shake|tilt|lookup|excited)(\s+|$)/i;
+
+/** Strip a leading gesture token if the model leaked it into visible text. */
+function stripLeadingGesture(text: string): string {
+  return text.replace(GESTURE_PREFIX_RE, "");
+}
+
+/** Strip markdown markers so TTS reads plain words (chat display keeps raw markdown). */
+function stripMarkdownForSpeech(text: string): string {
+  let cleaned = text;
+
+  // Paired bold/italic — loop until stable (handles nested/overlapping runs)
+  let prev = "";
+  while (prev !== cleaned) {
+    prev = cleaned;
+    cleaned = cleaned.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1");
+  }
+
+  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
+  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
+  cleaned = cleaned.replace(/^#+\s+/gm, "");
+  cleaned = cleaned.replace(/^\s*[-*]\s+/gm, "");
+
+  // Stray markers (unclosed bold, sentence splits mid-markdown)
+  cleaned = cleaned.replace(/\*+/g, "");
+  cleaned = cleaned.replace(/(?<!\w)_(?!\w)/g, "");
+  cleaned = cleaned.replace(/^\s+/gm, "");
+  cleaned = cleaned.replace(/  +/g, " ");
+
+  return cleaned;
+}
+
 /**
  * Strips markdown and expands common abbreviations so the TTS engine reads it naturally.
  */
 function cleanTextForTTS(text: string, language: string): string {
-  let cleaned = text;
+  let cleaned = stripLeadingGesture(text);
+  cleaned = stripMarkdownForSpeech(cleaned);
 
-  // 1. Remove Markdown formatting
-  cleaned = cleaned.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1");
-  cleaned = cleaned.replace(/`([^`]+)`/g, "$1");
-  cleaned = cleaned.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-  cleaned = cleaned.replace(/^#+\s+/gm, "");
-
-  // 2. Strip internal markers
+  // Strip internal markers
   cleaned = cleaned.replace(/\[SHOW_QR\]/gi, "");
 
-  // 3. Expand common abbreviations (English only)
+  // Expand common abbreviations (English only)
   if (!language.startsWith("zh")) {
     cleaned = cleaned.replace(/\be\.g\./gi, "for example");
     cleaned = cleaned.replace(/\bi\.e\./gi, "that is");
@@ -93,6 +120,15 @@ function extractSentences(buffer: string): { sentences: string[]; rest: string }
   return { sentences, rest: buffer.slice(lastIndex) };
 }
 
+const botMarkdownComponents = {
+  p: ({ ...props }) => <p className="mb-2.5 last:mb-0 leading-relaxed" {...props} />,
+  strong: ({ ...props }) => <strong className="font-semibold text-[#0a2240]" {...props} />,
+  ul: ({ ...props }) => <ul className="my-2 ml-4 list-disc space-y-1" {...props} />,
+  ol: ({ ...props }) => <ol className="my-2 ml-4 list-decimal space-y-1" {...props} />,
+  li: ({ ...props }) => <li className="leading-relaxed" {...props} />,
+  a: ({ ...props }) => <a className="text-[#0a2240] font-semibold hover:underline" {...props} />,
+};
+
 function BotAvatar() {
   return (
     <div
@@ -114,7 +150,6 @@ export default function Chat({
   onRecordingStatusChange,
   onThinkingChange,
   speechEndCallbackRef,
-  localeReady = false,
 }: ChatProps) {
   const router = useRouter();
   const initialLang = getAvailableLanguages(language)[0];
@@ -153,7 +188,6 @@ export default function Chat({
   const [currentLanguageIndex, setCurrentLanguageIndex] = useState(0);
   const currentLanguage = availableLanguages[currentLanguageIndex];
   const localeStrings = getLocaleStrings(currentLanguage);
-  const welcomeSpokenRef = useRef(false);
 
   useEffect(() => {
     setMessages((prev) => {
@@ -237,14 +271,6 @@ export default function Chat({
     pendingTtsRef.current.push(fetchTtsSegment(text, gesture));
     drainTtsQueue();
   }, [fetchTtsSegment, drainTtsQueue]);
-
-  // Speak welcome message when session opens (does not block user input)
-  useEffect(() => {
-    if (!localeReady || welcomeSpokenRef.current || !onBotSpeech) return;
-    welcomeSpokenRef.current = true;
-    const welcomeText = getLocaleStrings(currentLanguage).chat.welcome(avatarName);
-    enqueueTts(cleanTextForTTS(welcomeText, currentLanguage), "idle");
-  }, [localeReady, onBotSpeech, avatarName, currentLanguage, enqueueTts]);
 
   // ── Chat logic ────────────────────────────────────────────────────────────
   const handleSend = async (textToSend?: string) => {
@@ -338,8 +364,9 @@ export default function Chat({
             } else if (parsed.type === "chunk") {
               setIsThinking(false);
               // Strip QR marker before display and TTS
-              const chunkVal = parsed.value.replace(/\[SHOW_QR\]/gi, "");
+              let chunkVal = parsed.value.replace(/\[SHOW_QR\]/gi, "");
               if (chunkVal !== parsed.value) showQrDetected = true;
+              if (!messageAdded) chunkVal = stripLeadingGesture(chunkVal);
               fullText += chunkVal;
               sentenceBuffer += chunkVal;
 
@@ -523,12 +550,7 @@ export default function Chat({
                       className="rounded-2xl rounded-tl-sm px-4 py-3 text-[15px] shadow-sm prose prose-sm max-w-none text-[#1e293b]"
                       style={{ background: "white", border: "1px solid #f1f5f9", lineHeight: 1.5, display: "inline-block" }}
                     >
-                      <ReactMarkdown
-                        components={{
-                          p: ({ node, ...props }) => <p className="m-0" {...props} />,
-                          a: ({ node, ...props }) => <a className="text-[#0a2240] font-semibold hover:underline" {...props} />
-                        }}
-                      >
+                      <ReactMarkdown components={botMarkdownComponents}>
                         {message.text.replace(/\[SHOW_QR\]/g, "").trim()}
                       </ReactMarkdown>
                     </div>

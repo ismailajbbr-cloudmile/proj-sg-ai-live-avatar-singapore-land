@@ -22,6 +22,39 @@ router = APIRouter()
 VALID_GESTURES = {"idle", "nod", "shake", "tilt", "lookup", "excited"}
 
 
+def _parse_leading_gesture(text: str) -> tuple[str, str]:
+    """Parse optional leading gesture token. Returns (gesture, visible_text)."""
+    if not text:
+        return "idle", ""
+
+    stripped = text.lstrip("\ufeff")
+    if not stripped:
+        return "idle", text
+
+    newline_idx = stripped.find("\n")
+    first_line = (
+        stripped[:newline_idx].strip().lower()
+        if newline_idx != -1
+        else stripped.strip().lower()
+    )
+
+    if first_line in VALID_GESTURES:
+        if newline_idx != -1:
+            remainder = stripped[newline_idx + 1 :].lstrip("\n")
+        else:
+            remainder = ""
+        return first_line, remainder
+
+    lower = stripped.lower()
+    for gesture in sorted(VALID_GESTURES, key=len, reverse=True):
+        for sep in (" ", "\t"):
+            prefix = gesture + sep
+            if lower.startswith(prefix):
+                return gesture, stripped[len(gesture) :].lstrip()
+
+    return "idle", text
+
+
 async def _get_or_create_kiosk_user(username: str, db: AsyncSession) -> uuid.UUID:
     """Return the DB user id for the admin/kiosk account, creating a placeholder row if needed."""
     result = await db.execute(select(User).where(User.username == username))
@@ -148,24 +181,23 @@ async def chat(
                         line_buffer += chunk_text
                         newline_idx = line_buffer.find("\n")
                         if newline_idx != -1:
-                            gesture_line = line_buffer[:newline_idx].strip().lower()
-                            gesture = gesture_line if gesture_line in VALID_GESTURES else "idle"
+                            gesture, remainder = _parse_leading_gesture(line_buffer)
                             yield sse({"type": "gesture", "value": gesture})
                             gesture_emitted = True
-                            rest = line_buffer[newline_idx + 1:]
-                            if rest:
-                                collected_text += rest
-                                yield sse({"type": "chunk", "value": rest})
+                            if remainder:
+                                collected_text += remainder
+                                yield sse({"type": "chunk", "value": remainder})
                             line_buffer = ""
                     else:
                         collected_text += chunk_text
                         yield sse({"type": "chunk", "value": chunk_text})
 
                 if not gesture_emitted:
-                    yield sse({"type": "gesture", "value": "idle"})
-                    if line_buffer:
-                        collected_text += line_buffer
-                        yield sse({"type": "chunk", "value": line_buffer})
+                    gesture, remainder = _parse_leading_gesture(line_buffer)
+                    yield sse({"type": "gesture", "value": gesture})
+                    if remainder:
+                        collected_text += remainder
+                        yield sse({"type": "chunk", "value": remainder})
 
                 if "[SHOW_QR]" in collected_text:
                     yield sse({"type": "show_qr", "value": True})
