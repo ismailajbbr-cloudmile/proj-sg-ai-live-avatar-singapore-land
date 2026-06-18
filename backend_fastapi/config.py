@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     google_vertex_location: str = "us-central1"
     vertex_ai_web_datastore_id: str = ""
     vertex_ai_pdf_datastore_id: str = ""
+    require_datastore_grounding: bool = True
 
     gemini_chat_model: str = "gemini-2.5-flash"
 
