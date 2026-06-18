@@ -3,7 +3,9 @@ Vertex AI Gemini streaming client — Python port of frontend_nextjs/src/app/api
 """
 
 import logging
+import re
 import time
+from dataclasses import dataclass, field
 from datetime import datetime
 from typing import AsyncIterator
 from zoneinfo import ZoneInfo
@@ -78,6 +80,37 @@ Formatting for chat display (use markdown in your spoken response text):
 - Put a blank line between sections (intro, deal list, membership info).
 - Do NOT use # headings or code blocks."""
 
+_SMALL_TALK_PATTERN = re.compile(
+    r"^\s*(?:"
+    r"hi|hello|hey|yo|"
+    r"good\s+(?:morning|afternoon|evening|night)|"
+    r"thanks?(?:\s+you)?|thank\s+you|thx|"
+    r"bye|goodbye|see\s+you|"
+    r"how\s+are\s+you|what(?:'s|\s+is)\s+up|"
+    r"你好|您好|谢谢|多谢|再见|再会|"
+    r"早上好|下午好|晚上好|午安|"
+    r"你好吗|怎么样"
+    r")\s*[!.?，。！？]*\s*$",
+    re.IGNORECASE,
+)
+
+
+@dataclass
+class GroundingState:
+    grounding_chunks: list = field(default_factory=list)
+    grounding_supports: list = field(default_factory=list)
+    retrieval_queries: list[str] = field(default_factory=list)
+
+
+def _grounding_rules() -> str:
+    return """Knowledge base rules (STRICT — applies to all factual questions):
+- Answer ONLY using information retrieved from the Marina Square knowledge base (website and PDF datastores).
+- NEVER invent or guess store names, tenant locations, promotions, events, opening hours, parking rates, or facility details.
+- Do NOT rely on general world knowledge for Marina Square facts — use retrieved sources only.
+- If retrieval returns nothing relevant, or you are unsure whether a fact is in the knowledge base, use gesture "tilt" and say you do not have that information. Direct the visitor to the information counter on Level 2 or Marina Square's official website.
+- Do NOT append [SHOW_QR] unless you have grounded directions to a specific in-mall tenant from retrieved sources.
+- You MAY respond without retrieval only for greetings, thanks, goodbye, and brief clarifying questions — not for mall facts."""
+
 
 def _session_language_instruction(language: str) -> str:
     if language.startswith("zh"):
@@ -100,14 +133,83 @@ def _promo_event_rules() -> str:
 - When the user asks about promotions, deals, or events, only mention items that are CURRENT or UPCOMING as of today.
 - Do NOT mention expired, past, or ended promotions/events unless the user explicitly asks about history.
 - If grounding sources include date ranges, compare against today and exclude anything that has already ended.
-- If no current/upcoming items are found, say you don't have current promotion/event details and suggest checking Marina Square's website or information counter."""
+- If no current/upcoming items are found in retrieved sources, say you don't have current promotion/event details and suggest checking Marina Square's website or information counter."""
 
 
 def _build_system_instruction(language: str = "en-US") -> str:
     return (
         f"{SYSTEM_INSTRUCTION.strip()}\n\n"
+        f"{_grounding_rules()}\n\n"
         f"{_promo_event_rules()}\n\n"
         f"{_session_language_instruction(language)}"
+    )
+
+
+def _is_small_talk(message: str) -> bool:
+    return bool(_SMALL_TALK_PATTERN.match(message.strip()))
+
+
+def _fallback_response(language: str) -> str:
+    if language.startswith("zh"):
+        return (
+            "tilt\n"
+            "抱歉，我目前的滨海广场资料库中没有这方面的信息。"
+            "请咨询二楼问询处，或浏览滨海广场官方网站获取最新资讯。"
+        )
+    return (
+        "tilt\n"
+        "I don't have that information in my current Marina Square directory. "
+        "Please check with the information counter on Level 2 or visit Marina Square's "
+        "official website for the latest details."
+    )
+
+
+_REFUSAL_PATTERN = re.compile(
+    r"(?:"
+    r"don'?t have (?:that |current )?(?:information|details|promotion|event)"
+    r"|do not have (?:that |current )?(?:information|details|promotion|event)"
+    r"|没有(?:这|该|相关)?(?:方面)?(?:的)?(?:信息|资料|详情|促销|活动)"
+    r"|无法(?:找到|提供)"
+    r")",
+    re.IGNORECASE,
+)
+
+
+def _model_already_refused(text: str) -> bool:
+    """True when the model already declined per prompt rules — skip generic fallback."""
+    body = text.split("\n", 1)[-1] if "\n" in text else text
+    return bool(_REFUSAL_PATTERN.search(body))
+
+
+def _has_datastore_grounding() -> bool:
+    return bool(settings.vertex_ai_web_datastore_id or settings.vertex_ai_pdf_datastore_id)
+
+
+def _merge_grounding_metadata(state: GroundingState, chunk: types.GenerateContentResponse) -> None:
+    if not chunk.candidates:
+        return
+    meta = chunk.candidates[0].grounding_metadata
+    if not meta:
+        return
+    queries = getattr(meta, "retrieval_queries", None) or []
+    for q in queries:
+        if q not in state.retrieval_queries:
+            state.retrieval_queries.append(q)
+    chunks = getattr(meta, "grounding_chunks", None) or []
+    if chunks:
+        state.grounding_chunks.extend(chunks)
+    supports = getattr(meta, "grounding_supports", None) or []
+    if supports:
+        state.grounding_supports.extend(supports)
+
+
+def _is_grounded(state: GroundingState, message: str) -> bool:
+    if _is_small_talk(message):
+        return True
+    return (
+        len(state.grounding_chunks) > 0
+        or len(state.grounding_supports) > 0
+        or len(state.retrieval_queries) > 0
     )
 
 
@@ -132,6 +234,31 @@ def _is_gemini_3_family(model: str) -> bool:
     return "gemini-3" in model
 
 
+def _build_grounding_tools() -> list[types.Tool]:
+    grounding_tools: list[types.Tool] = []
+    if settings.vertex_ai_web_datastore_id:
+        grounding_tools.append(
+            types.Tool(
+                retrieval=types.Retrieval(
+                    vertex_ai_search=types.VertexAISearch(
+                        datastore=_datastore_path(settings.vertex_ai_web_datastore_id)
+                    )
+                )
+            )
+        )
+    if settings.vertex_ai_pdf_datastore_id:
+        grounding_tools.append(
+            types.Tool(
+                retrieval=types.Retrieval(
+                    vertex_ai_search=types.VertexAISearch(
+                        datastore=_datastore_path(settings.vertex_ai_pdf_datastore_id)
+                    )
+                )
+            )
+        )
+    return grounding_tools
+
+
 def _build_generate_config(
     grounding_tools: list[types.Tool],
     model: str,
@@ -140,6 +267,8 @@ def _build_generate_config(
     kwargs: dict = {
         "system_instruction": _build_system_instruction(language),
         "tools": grounding_tools if grounding_tools else None,
+        "temperature": 0.0,
+        "top_p": 0.95,
     }
     if _is_gemini_3_family(model):
         kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="minimal")
@@ -169,31 +298,23 @@ async def stream_gemini_response(
     history: list[dict],
     language: str = "en-US",
 ) -> AsyncIterator[str]:
-    client = _get_client()
     model = settings.gemini_chat_model
+    grounding_tools = _build_grounding_tools()
 
-    grounding_tools = []
-    if settings.vertex_ai_web_datastore_id:
-        grounding_tools.append(
-            types.Tool(
-                retrieval=types.Retrieval(
-                    vertex_ai_search=types.VertexAISearch(
-                        datastore=_datastore_path(settings.vertex_ai_web_datastore_id)
-                    )
-                )
-            )
+    if not _has_datastore_grounding():
+        logger.warning(
+            "[Gemini] No Vertex AI Search datastore IDs configured — "
+            "VERTEX_AI_WEB_DATASTORE_ID and VERTEX_AI_PDF_DATASTORE_ID are empty"
         )
-    if settings.vertex_ai_pdf_datastore_id:
-        grounding_tools.append(
-            types.Tool(
-                retrieval=types.Retrieval(
-                    vertex_ai_search=types.VertexAISearch(
-                        datastore=_datastore_path(settings.vertex_ai_pdf_datastore_id)
-                    )
-                )
-            )
-        )
+        if settings.require_datastore_grounding:
+            yield _fallback_response(language)
+            return
 
+    if settings.require_datastore_grounding and not _is_small_talk(message) and not grounding_tools:
+        yield _fallback_response(language)
+        return
+
+    client = _get_client()
     contents = [
         *history,
         {"role": "user", "parts": [{"text": message}]},
@@ -206,8 +327,8 @@ async def stream_gemini_response(
     )
 
     started_at = time.monotonic()
-    first_chunk_at: float | None = None
-    yielded_any = False
+    buffered_text = ""
+    grounding_state = GroundingState()
     last_finish_reason: str | None = None
 
     async for chunk in stream:
@@ -215,33 +336,48 @@ async def stream_gemini_response(
             reason = chunk.candidates[0].finish_reason
             if reason is not None:
                 last_finish_reason = str(reason)
+            _merge_grounding_metadata(grounding_state, chunk)
 
         text = _chunk_visible_text(chunk)
-        if not text:
-            continue
-
-        if first_chunk_at is None:
-            first_chunk_at = time.monotonic()
-            logger.info(
-                "[Gemini] model=%s time_to_first_chunk_s=%.3f",
-                model,
-                first_chunk_at - started_at,
-            )
-
-        yielded_any = True
-        yield text
+        if text:
+            buffered_text += text
 
     elapsed = time.monotonic() - started_at
-    if not yielded_any:
+    final_text = buffered_text
+
+    enforce_grounding = settings.require_datastore_grounding and bool(grounding_tools)
+    if not final_text.strip():
         logger.warning(
-            "[Gemini] model=%s no_text_yielded elapsed_s=%.3f finish_reason=%s",
+            "[Gemini] model=%s no_text_yielded elapsed_s=%.3f finish_reason=%s "
+            "chunks=%d supports=%d queries=%r",
             model,
             elapsed,
             last_finish_reason,
+            len(grounding_state.grounding_chunks),
+            len(grounding_state.grounding_supports),
+            grounding_state.retrieval_queries,
         )
-    elif first_chunk_at is not None:
+        if enforce_grounding and not _is_small_talk(message) and not _model_already_refused(final_text):
+            final_text = _fallback_response(language)
+    else:
+        grounded = _is_grounded(grounding_state, message)
         logger.info(
-            "[Gemini] model=%s stream_complete elapsed_s=%.3f",
+            "[Gemini] model=%s stream_complete elapsed_s=%.3f grounded=%s "
+            "chunks=%d supports=%d queries=%r",
             model,
             elapsed,
+            grounded,
+            len(grounding_state.grounding_chunks),
+            len(grounding_state.grounding_supports),
+            grounding_state.retrieval_queries,
         )
+        if enforce_grounding and not grounded and not _is_small_talk(message):
+            logger.warning(
+                "[Gemini] no_grounding_metadata model=%s message=%r — "
+                "trusting strict prompt (Gemini 2.5 may omit chunks)",
+                model,
+                message,
+            )
+
+    if final_text:
+        yield final_text
