@@ -107,8 +107,9 @@ def _grounding_rules() -> str:
 - Answer ONLY using information retrieved from the Marina Square knowledge base (website and PDF datastores).
 - NEVER invent or guess store names, tenant locations, promotions, events, opening hours, parking rates, or facility details.
 - Do NOT rely on general world knowledge for Marina Square facts — use retrieved sources only.
-- If retrieval returns nothing relevant, or you are unsure whether a fact is in the knowledge base, use gesture "tilt" and say you do not have that information. Direct the visitor to the information counter on Level 2 or Marina Square's official website.
-- Do NOT append [SHOW_QR] unless you have grounded directions to a specific in-mall tenant from retrieved sources.
+- STORE DIRECTORY SOURCE OF TRUTH: The Marina Square WEBSITE is the authoritative source for which stores and tenants currently exist in the mall, their names, and their locations. The PDF documents contain supplementary operational information only (e.g. parking, facilities, policies). If a store or tenant name appears ONLY in PDF sources but NOT in the website source, do NOT treat it as a current tenant — it may be outdated. Only confirm a store exists if it appears in the website knowledge base.
+- If retrieval returns nothing relevant from the website source, or you are unsure whether a store is currently in the mall, use gesture "tilt" and say you do not have that information. Direct the visitor to the information counter on Level 2 or Marina Square's official website.
+- Do NOT append [SHOW_QR] unless you have grounded directions to a specific in-mall tenant from the website source.
 - You MAY respond without retrieval only for greetings, thanks, goodbye, and brief clarifying questions — not for mall facts."""
 
 
@@ -153,14 +154,15 @@ def _fallback_response(language: str) -> str:
     if language.startswith("zh"):
         return (
             "tilt\n"
-            "抱歉，我目前的滨海广场资料库中没有这方面的信息。"
-            "请咨询二楼问询处，或浏览滨海广场官方网站获取最新资讯。"
+            "抱歉，这个信息目前不在我的资料库中。"
+            "您可以浏览滨海广场官方网站 marinasquare.com.sg 获取详细资讯，"
+            "或者到二楼问询处咨询，我们很乐意为您提供帮助！"
         )
     return (
         "tilt\n"
-        "I don't have that information in my current Marina Square directory. "
-        "Please check with the information counter on Level 2 or visit Marina Square's "
-        "official website for the latest details."
+        "I'm sorry, that's not something I have in my directory at the moment. "
+        "You can visit marinasquare.com.sg for more detailed information, "
+        "or feel free to check with our information counter on Level 2 — they'll be happy to help!"
     )
 
 
@@ -209,7 +211,6 @@ def _is_grounded(state: GroundingState, message: str) -> bool:
     return (
         len(state.grounding_chunks) > 0
         or len(state.grounding_supports) > 0
-        or len(state.retrieval_queries) > 0
     )
 
 
@@ -372,12 +373,22 @@ async def stream_gemini_response(
             grounding_state.retrieval_queries,
         )
         if enforce_grounding and not grounded and not _is_small_talk(message):
-            logger.warning(
-                "[Gemini] no_grounding_metadata model=%s message=%r — "
-                "trusting strict prompt (Gemini 2.5 may omit chunks)",
-                model,
-                message,
-            )
+            if _model_already_refused(final_text):
+                logger.info(
+                    "[Gemini] ungrounded_but_model_refused model=%s message=%r — "
+                    "keeping model's own refusal",
+                    model,
+                    message,
+                )
+            else:
+                logger.warning(
+                    "[Gemini] ungrounded_response_replaced model=%s message=%r — "
+                    "replacing with fallback (had queries=%r but no chunks/supports)",
+                    model,
+                    message,
+                    grounding_state.retrieval_queries,
+                )
+                final_text = _fallback_response(language)
 
     if final_text:
         yield final_text
