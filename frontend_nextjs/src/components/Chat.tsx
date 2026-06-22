@@ -291,6 +291,7 @@ export default function Chat({
       } else {
         pendingMessageQueueRef.current.push(text);
         setQueuedMessageCount(pendingMessageQueueRef.current.length);
+        setInput("");
         return;
       }
     }
