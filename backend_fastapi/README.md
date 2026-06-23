@@ -169,7 +169,7 @@ curl http://localhost:8000/health
 | Layer | Owns |
 |---|---|
 | `routers/` | HTTP endpoints, Pydantic request models, SSE generators |
-| `services/` | Gemini streaming, TTS synthesis, viseme generation, DB engine |
+| `services/` | Gemini streaming, Vertex AI Search (direct), TTS synthesis, viseme generation, DB engine |
 | `auth/` | JWT create/decode, `get_current_user`, `require_admin` |
 | `models/` | SQLAlchemy ORM (`User`, `Conversation`, `Message`) |
 | `config.py` | Pydantic Settings loaded from repo-root `.env` |
@@ -335,23 +335,38 @@ Frontend mapping: `/api/auth` → `/auth/login`, `/api/auth/me` → `/auth/me`, 
 
 SSE format: `data: {"type": "...", "value": "..."}\n\n`
 
-### Vertex AI RAG Grounding
+### Vertex AI RAG Grounding (Hybrid Search)
 
-**File:** `services/gemini.py`
+**Files:** `services/gemini.py`, `services/vertex_search.py`
 
-Optional retrieval tools attached when env vars are set:
+The chat uses a **hybrid search strategy** with two paths depending on query type:
 
-```
-projects/{GOOGLE_VERTEX_PROJECT}/locations/global/collections/default_collection/dataStores/{DATASTORE_ID}
-```
+| Query type | Detection | Search method | Rationale |
+|---|---|---|---|
+| Promo/event/entertainment | Keyword regex (`_PROMO_EVENT_PATTERN`) | Gemini built-in retrieval tools | Richer content, better for time-limited items |
+| Location/general | Everything else | Direct Discovery Engine API (`vertex_search.py`) | Deterministic, cross-lingual via search engine |
+| Small talk | Greeting/thanks regex | No search | No datastore needed |
+
+**Direct search** (`services/vertex_search.py`):
+- Uses `SearchServiceAsyncClient` from `google-cloud-discoveryengine`
+- Prefers engine serving config (`VERTEX_AI_WEB_ENGINE_ID`) for cross-lingual semantic search
+- Falls back to datastore serving config (`VERTEX_AI_WEB_DATASTORE_ID`) if no engine
+- Searches web + PDF datastores concurrently via `asyncio.gather`
+- Chinese question words (在哪里, 怎么去, etc.) are stripped before searching for better results
+- Results formatted into a context block injected into the system prompt
+
+**Gemini retrieval** (promo/event queries):
+- Attaches Vertex AI Search retrieval tools directly to the Gemini request
+- System prompt includes date filtering rules to suppress expired promotions
 
 | Env var | Content |
 |---|---|
-| `VERTEX_AI_WEB_DATASTORE_ID` | Website content |
-| `VERTEX_AI_PDF_DATASTORE_ID` | PDF documents |
+| `VERTEX_AI_WEB_ENGINE_ID` | Website search engine (cross-lingual semantic search, preferred) |
+| `VERTEX_AI_WEB_DATASTORE_ID` | Website datastore (fallback if no engine) |
+| `VERTEX_AI_PDF_DATASTORE_ID` | PDF documents (supplementary) |
+| `REQUIRE_DATASTORE_GROUNDING` | When `true`, return fallback if no search results (default `true`) |
 
 - Location is always `global` for Vertex AI Search (not `us-central1`).
-- Both datastores can be active simultaneously as separate tools.
 - Empty IDs = no grounding (Gemini uses system prompt only).
 - **Grounding metadata / citations are not forwarded** to the client — only streamed text.
 
@@ -489,7 +504,8 @@ backend_fastapi/
 │
 ├── services/
 │   ├── db.py                       # Async engine + session factory
-│   ├── gemini.py                   # Vertex AI Gemini streaming + RAG
+│   ├── gemini.py                   # Vertex AI Gemini streaming + hybrid RAG routing
+│   ├── vertex_search.py            # Discovery Engine direct search (cross-lingual)
 │   ├── tts_service.py              # Google Cloud TTS
 │   └── viseme.py                   # Phoneme → viseme frame pipeline
 │
@@ -543,7 +559,8 @@ erDiagram
 | File | Edit when you need to… |
 |---|---|
 | `routers/chat.py` | Change SSE events, gesture parsing, conversation logic |
-| `services/gemini.py` | Update system prompt, RAG tools, model config |
+| `services/gemini.py` | Update system prompt, RAG tools, query routing, model config |
+| `services/vertex_search.py` | Change direct search behavior, datastores, Chinese query simplification |
 | `services/tts_service.py` | Change TTS model, voice, language mapping |
 | `services/viseme.py` | Adjust phoneme mapping or timing constants |
 | `auth/dependencies.py` | Change auth guards or admin checks |
@@ -644,7 +661,9 @@ Loaded from repo-root `.env` via `config.py`. Docker Compose `environment:` over
 | `GOOGLE_VERTEX_PROJECT` | `""` | For chat | GCP project for Vertex AI |
 | `GOOGLE_VERTEX_LOCATION` | `us-central1` | No | Vertex AI region |
 | `VERTEX_AI_WEB_DATASTORE_ID` | `""` | No | Web RAG datastore |
+| `VERTEX_AI_WEB_ENGINE_ID` | `""` | No | Web search engine (cross-lingual, preferred over datastore) |
 | `VERTEX_AI_PDF_DATASTORE_ID` | `""` | No | PDF RAG datastore |
+| `REQUIRE_DATASTORE_GROUNDING` | `true` | No | Enforce grounding; return fallback if no results |
 | `GEMINI_CHAT_MODEL` | `gemini-2.5-flash` | No | Chat model name |
 | `GOOGLE_APPLICATION_CREDENTIALS` | `/app/credentials/gcp-key.json` | No | GCP key file path |
 | `NEXT_PUBLIC_ORIGIN` | `http://localhost:3000` | No | CORS allowed origin |

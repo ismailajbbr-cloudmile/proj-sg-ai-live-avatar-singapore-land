@@ -253,7 +253,9 @@ All services read from repo-root `.env`. Docker Compose `environment:` overrides
 | `GOOGLE_VERTEX_LOCATION` | Backend | No | Vertex AI region (default `us-central1`) |
 | `GEMINI_CHAT_MODEL` | Backend | No | Chat model (default `gemini-2.5-flash`) |
 | `VERTEX_AI_WEB_DATASTORE_ID` | Backend | No | RAG — website datastore |
+| `VERTEX_AI_WEB_ENGINE_ID` | Backend | No | RAG — website search engine (cross-lingual semantic search, preferred over datastore) |
 | `VERTEX_AI_PDF_DATASTORE_ID` | Backend | No | RAG — PDF datastore |
+| `REQUIRE_DATASTORE_GROUNDING` | Backend | No | Enforce grounding; return fallback if no datastore matches (default `true`) |
 | `TTS_MODEL` | Backend | No | TTS model (default `gemini-2.5-flash-tts`) |
 | `TTS_VOICE_NAME` | Backend | No | TTS voice (default `Achernar`) |
 | `TTS_VOICE_PROMPT` | Backend | No | TTS style instruction |
@@ -374,6 +376,7 @@ Automated deployment to GCP Compute Engine via [`.github/workflows/main.yml`](.g
 | `ADMIN_USERNAME` / `ADMIN_PASSWORD` | Admin login |
 | `GOOGLE_VERTEX_PROJECT` / `GOOGLE_VERTEX_LOCATION` | Vertex AI |
 | `VERTEX_AI_WEB_DATASTORE_ID` / `VERTEX_AI_PDF_DATASTORE_ID` | RAG datastores |
+| `VERTEX_AI_WEB_ENGINE_ID` | RAG cross-lingual search engine |
 | `GEMINI_CHAT_MODEL` | Chat model |
 | `TTS_MODEL` / `TTS_VOICE_NAME` | TTS config |
 | `SESSION_IDLE_TIMEOUT_MINUTES` | Kiosk idle timeout |
@@ -469,7 +472,7 @@ The backend (`backend_fastapi/`) is the **API and business-logic layer**. It own
 | Area | Details |
 |---|---|
 | **Routers** | `/auth`, `/chat` (SSE), `/tts`, `/users`, `/conversations`, `/analytics`, `/config` |
-| **Services** | `gemini.py` (Vertex AI streaming + RAG), `tts_service.py`, `viseme.py` |
+| **Services** | `gemini.py` (Vertex AI streaming + hybrid RAG), `vertex_search.py` (Discovery Engine direct search), `tts_service.py`, `viseme.py` |
 | **Database** | PostgreSQL — `users`, `conversations`, `messages` tables |
 | **Auth** | JWT cookie, env admin + DB users, bcrypt passwords |
 | **Chat SSE** | Events: `conversation_id`, `gesture`, `chunk`, `show_qr`, `done`, `error` |
