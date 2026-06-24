@@ -345,10 +345,26 @@ def format_search_context(search_response: SearchResponse) -> str:
             )
             continue
 
+        # Per-snippet filtering: a single result page may mix current and past events
+        live_snippets = []
+        for snippet in result.snippets:
+            if _is_expired_content(snippet):
+                logger.info(
+                    "[VertexSearch] filtering expired snippet in: %s", result.title,
+                )
+                continue
+            live_snippets.append(snippet)
+
+        if not live_snippets:
+            logger.info(
+                "[VertexSearch] all snippets expired, dropping result: %s", result.title,
+            )
+            continue
+
         source_idx += 1
         source_tag = f"[Source {source_idx}: {result.title}] [datastore: {result.source_datastore}]"
         parts.append(source_tag)
-        for snippet in result.snippets:
+        for snippet in live_snippets:
             if total_chars + len(snippet) > _MAX_TOTAL_CONTEXT_CHARS:
                 break
             parts.append(snippet)

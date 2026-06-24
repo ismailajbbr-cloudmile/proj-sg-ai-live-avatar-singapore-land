@@ -136,6 +136,8 @@ def _promo_event_rules() -> str:
   • If ALL dates are in {current_year - 1} or earlier → EXPIRED → omit entirely.
   • NEVER say "this event has ended", "已经结束", or "no specific dates provided" — just leave it out.
 - When listing time-limited items, always include the validity period from the context.
+- NEVER change or "update" dates from the context. If the context shows a year like {current_year - 1} or {current_year - 2}, that is the REAL year — the event is EXPIRED. Do NOT substitute the current year ({current_year}) for a past year.
+- Present dates EXACTLY as they appear in the retrieved context. If the context says "July 2024", it happened in 2024 — do NOT say "July {current_year}".
 - If no current/upcoming items with confirmed dates exist after filtering, say so and suggest marinasquare.com.sg or the Level 2 information counter."""
 
 
