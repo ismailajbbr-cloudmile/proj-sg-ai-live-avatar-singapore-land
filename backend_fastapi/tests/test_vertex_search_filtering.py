@@ -149,10 +149,10 @@ class TestIsExpiredContent:
         with _patch_now():
             assert _is_expired_content("CNY Bazaar 15 February") is True
 
-    def test_yearless_no_keyword_not_filtered(self):
-        """Year-less dates without promo keywords don't trigger filtering."""
+    def test_yearless_no_keyword_still_filtered(self):
+        """Year-less dates are treated as stale event signal regardless of keywords."""
         with _patch_now():
-            assert _is_expired_content("Open since 15 March") is False
+            assert _is_expired_content("Open since 15 March") is True
 
     def test_travel_goods_fair_no_year(self):
         """Travel Goods Fair 23 Jul to 4 Aug — no year + 'fair' keyword = filtered."""
@@ -186,10 +186,10 @@ class TestIsExpiredContent:
     def test_force_promo_no_keyword_snippet_filtered(self):
         """Snippet has no promo keywords, but force_promo=True from title → filtered."""
         with _patch_now():
-            # This snippet has no promo keywords and no year — normally kept
+            # This snippet has year-less dates → now always filtered
             text = "from 9 to 14 July with a wide selection of children's books at great prices"
-            assert _is_expired_content(text) is False  # no keywords → kept
-            assert _is_expired_content(text, force_promo=True) is True  # forced → filtered
+            assert _is_expired_content(text) is True  # year-less date = stale signal
+            assert _is_expired_content(text, force_promo=True) is True  # also filtered
 
     def test_force_promo_with_full_future_date_kept(self):
         """force_promo + full future date → still kept (date is verifiable)."""
@@ -208,6 +208,37 @@ class TestIsExpiredContent:
         with _patch_now():
             text = "14th to 17th November at Linkbridge, Level 2"
             assert _is_expired_content(text, force_promo=True) is True
+
+    # ── Real snippets from logs ──
+
+    def test_real_book_fair_snippet(self):
+        """Actual snippet from datastore — Book Fair with no year."""
+        with _patch_now():
+            text = (
+                "Join us @ Marina Square Level 2, Marina Foyer atrium, "
+                "from 9 to 14 July with a wide selection of children's "
+                "and adult books at great prices"
+            )
+            assert _is_expired_content(text) is True
+
+    def test_real_lg_tv_snippet(self):
+        """Actual snippet from datastore — LG TV event with no year."""
+        with _patch_now():
+            text = (
+                "Discover Unmatched Quality and Immersive Viewing with "
+                "LG's QNED and OLED TV at Marina Square Linkbridge, "
+                "Level 2, from 14th to 17th November"
+            )
+            assert _is_expired_content(text) is True
+
+    def test_real_september_event_snippet(self):
+        """Actual snippet — 'from 10 to 15 September' with no year."""
+        with _patch_now():
+            text = (
+                "Join us at the Central Atrium from 10 to 15 September, "
+                "and then catch us at the Marina Foyer Atrium from 16 to 29"
+            )
+            assert _is_expired_content(text) is True
 
 
 # ── _split_into_event_segments ──
@@ -282,12 +313,11 @@ class TestFilterSnippetSegments:
             assert "Starbucks" in result
 
     def test_force_promo_filters_no_keyword_snippet(self):
-        """Snippet without keywords from a promo-titled page → filtered."""
+        """Snippet with year-less dates → always filtered (stale event signal)."""
         with _patch_now():
             snippet = "from 9 to 14 July with a wide selection of children's books"
-            # Without force_promo: passes (no keywords, no year)
-            assert _filter_snippet_segments(snippet) == snippet
-            # With force_promo: filtered (treated as event content, no verifiable date)
+            # Year-less dates are now always filtered regardless of force_promo
+            assert _filter_snippet_segments(snippet) == ""
             assert _filter_snippet_segments(snippet, force_promo=True) == ""
 
     def test_force_promo_keeps_snippet_with_future_date(self):

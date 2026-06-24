@@ -19,6 +19,18 @@ logger = logging.getLogger(__name__)
 _MAX_SNIPPET_CHARS = 1000
 _MAX_TOTAL_CONTEXT_CHARS = 15000
 
+# Closed/departed tenants — filter out snippets mentioning these names.
+# Maintains accuracy when the datastore still has stale pages for former tenants.
+_EXCLUDED_TENANTS = {
+    "play nation",
+}
+
+
+def _mentions_excluded_tenant(text: str) -> bool:
+    """Return True if text mentions any excluded tenant (case-insensitive)."""
+    lower = text.lower()
+    return any(tenant in lower for tenant in _EXCLUDED_TENANTS)
+
 
 @dataclass
 class SearchResult:
@@ -97,6 +109,9 @@ async def _search(
         response = await client.search(request=request)
         results: list[SearchResult] = []
         async for result in response:
+            if len(results) >= max_results:
+                break  # Don't paginate beyond requested limit
+
             doc = result.document
             struct = doc.derived_struct_data or {}
 
@@ -165,19 +180,20 @@ async def search_datastores(query: str) -> SearchResponse:
     tasks = []
 
     # Web: prefer engine (cross-lingual semantic search) over raw datastore
+    # Use 50 results to find current events buried past generic "Marina Square" pages
     if settings.vertex_ai_web_engine_id:
         tasks.append(_search(
             search_query,
             serving_config=_engine_serving_config(settings.vertex_ai_web_engine_id),
             source_label="web",
-            max_results=10,
+            max_results=100,
         ))
     elif settings.vertex_ai_web_datastore_id:
         tasks.append(_search(
             search_query,
             serving_config=_datastore_serving_config(settings.vertex_ai_web_datastore_id),
             source_label="web",
-            max_results=10,
+            max_results=100,
         ))
 
     if settings.vertex_ai_pdf_datastore_id:
@@ -364,7 +380,13 @@ def _is_expired_content(text: str, force_promo: bool = False) -> bool:
         if has_promo and max_year == current_year:
             return True
 
-    # 3. No verifiable dates — only filter if it looks like a time-limited event
+    # 3. Year-less dates like "9 to 14 July", "14th November" — no year found.
+    #    Permanent store pages don't use "DD Month" patterns; events do.
+    #    Treat as stale event content regardless of promo keywords.
+    if _extract_latest_date_no_year(text) is not None:
+        return True
+
+    # 4. No verifiable dates — only filter if it looks like a time-limited event
     if has_promo:
         return True  # Time-limited content with no dates — can't verify, skip
 
@@ -453,8 +475,20 @@ def format_search_context(search_response: SearchResponse) -> str:
                 result.title, result.link,
             )
 
+        # Skip results that mention excluded (closed/departed) tenants
+        combined_text = f"{result.title} {' '.join(result.snippets)}"
+        if _mentions_excluded_tenant(combined_text):
+            logger.info(
+                "[VertexSearch] excluded tenant mentioned, dropping: %s", result.title,
+            )
+            continue
+
         live_snippets = []
         for snippet in result.snippets:
+            # Skip empty or too-short snippets (noise from the datastore)
+            clean = re.sub(r"<[^>]+>|&\w+;", "", snippet).strip()
+            if len(clean) < 20:
+                continue
             filtered = _filter_snippet_segments(snippet, force_promo=force_promo)
             if not filtered:
                 logger.info(

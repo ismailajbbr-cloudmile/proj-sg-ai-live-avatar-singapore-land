@@ -1,3 +1,4 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -5,6 +6,12 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
 from routers import auth, chat, conversations, tts, users, config_router, analytics
+
+# Configure app-level logging so services.vertex_search / services.gemini logs are visible
+logging.basicConfig(
+    level=logging.INFO,
+    format="[%(name)s] %(message)s",
+)
 
 
 @asynccontextmanager
