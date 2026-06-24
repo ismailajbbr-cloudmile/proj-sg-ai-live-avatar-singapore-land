@@ -209,21 +209,34 @@ _PROMO_EVENT_KEYWORDS = re.compile(
     r"campaign|celebrate|festival|lucky\s*draw|giveaway|contest|competition|"
     r"showdown|exhibit|pop.?up|roadshow|bouncy|fest\b|masterclass|workshop|"
     r"bazaar|fair\b|showcase|carnival|cny|chinese new year|"
+    r"fiesta|anniversary|challenge|cup\b|ticket|"
     r"促销|活动|优惠|折扣|抽奖|奖励|展览|展|比赛|竞赛|挑战|快闪|路演|嘉年华|工作坊|年货|新年)",
     re.IGNORECASE,
 )
 
+# Ordinal suffix for day numbers: 1st, 2nd, 3rd, 14th, etc.
+_ORD = r"(?:st|nd|rd|th)?"
+
+_MONTH_NAMES = (
+    r"(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
+)
+
 # Matches date patterns like "31 Dec 2025", "December 31, 2025", "2025-12-31", "31/12/2025", "2025年11月2日"
 _DATE_PATTERN = re.compile(
-    r"(\d{1,2})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{2,4})"  # DD/MM/YYYY or MM/DD/YYYY
-    r"|(\d{4})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{1,2})"   # YYYY-MM-DD
-    r"|(\d{1,2})\s+(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
-    r"\s+(\d{4})"                                          # DD Month YYYY
-    r"|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
-    r"\s+(\d{1,2}),?\s+(\d{4})"                           # Month DD, YYYY
-    r"|(\d{4})年(\d{1,2})月(\d{1,2})日",                    # Chinese: 2025年11月2日
+    r"(\d{1,2})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{2,4})"       # DD/MM/YYYY or MM/DD/YYYY
+    r"|(\d{4})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{1,2})"        # YYYY-MM-DD
+    rf"|(\d{{1,2}}){_ORD}\s+{_MONTH_NAMES}\s+(\d{{4}})"       # DD[th] Month YYYY
+    rf"|{_MONTH_NAMES}\s+(\d{{1,2}}){_ORD},?\s+(\d{{4}})"     # Month DD[th], YYYY
+    r"|(\d{4})年(\d{1,2})月(\d{1,2})日",                       # Chinese: 2025年11月2日
+    re.IGNORECASE,
+)
+
+# Year-less date pattern: "9 to 14 July", "14th November", "28 & 29 Sep"
+# Used when _DATE_PATTERN finds nothing — infers current year.
+_DATE_NO_YEAR_PATTERN = re.compile(
+    rf"(\d{{1,2}}){_ORD}\s+{_MONTH_NAMES}"                    # DD[th] Month
+    rf"|{_MONTH_NAMES}\s+(\d{{1,2}}){_ORD}",                  # Month DD[th]
     re.IGNORECASE,
 )
 
@@ -235,8 +248,20 @@ _MONTH_MAP = {
 }
 
 
+def _extract_month_from_match(match_text: str) -> int:
+    """Extract month number from a regex match string containing a month name."""
+    month_match = re.search(
+        r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
+        r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)",
+        match_text, re.IGNORECASE,
+    )
+    if month_match:
+        return _MONTH_MAP.get(month_match.group(1).lower()[:3], 0)
+    return 0
+
+
 def _extract_latest_date(text: str) -> datetime | None:
-    """Extract the latest date found in text. Returns None if no dates found."""
+    """Extract the latest full date (with year) found in text. Returns None if none found."""
     dates: list[datetime] = []
     for match in _DATE_PATTERN.finditer(text):
         groups = match.groups()
@@ -251,31 +276,43 @@ def _extract_latest_date(text: str) -> datetime | None:
             elif groups[3] is not None:  # YYYY-MM-DD
                 y, m, d = int(groups[3]), int(groups[4]), int(groups[5])
                 dates.append(datetime(y, m, d))
-            elif groups[6] is not None:  # DD Month YYYY
+            elif groups[6] is not None:  # DD[th] Month YYYY
                 d, y = int(groups[6]), int(groups[7])
-                month_str = re.search(
-                    r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-                    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)",
-                    match.group(), re.IGNORECASE,
-                )
-                if month_str:
-                    m = _MONTH_MAP.get(month_str.group(1).lower()[:3], 0)
-                    if m:
-                        dates.append(datetime(y, m, d))
-            elif groups[8] is not None:  # Month DD, YYYY
+                m = _extract_month_from_match(match.group())
+                if m:
+                    dates.append(datetime(y, m, d))
+            elif groups[8] is not None:  # Month DD[th], YYYY
                 d, y = int(groups[8]), int(groups[9])
-                month_str = re.search(
-                    r"(Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
-                    r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)",
-                    match.group(), re.IGNORECASE,
-                )
-                if month_str:
-                    m = _MONTH_MAP.get(month_str.group(1).lower()[:3], 0)
-                    if m:
-                        dates.append(datetime(y, m, d))
+                m = _extract_month_from_match(match.group())
+                if m:
+                    dates.append(datetime(y, m, d))
             elif groups[10] is not None:  # Chinese: 2025年11月2日
                 y, m, d = int(groups[10]), int(groups[11]), int(groups[12])
                 dates.append(datetime(y, m, d))
+        except (ValueError, OverflowError):
+            continue
+    return max(dates) if dates else None
+
+
+def _extract_latest_date_no_year(text: str) -> datetime | None:
+    """
+    Extract the latest date from year-less patterns like "14 July", "28 Sep".
+    Assumes current year. Returns None if no year-less dates found.
+    Only called when _extract_latest_date finds nothing.
+    """
+    current_year = datetime.now(ZoneInfo("Asia/Singapore")).year
+    dates: list[datetime] = []
+    for match in _DATE_NO_YEAR_PATTERN.finditer(text):
+        groups = match.groups()
+        try:
+            # groups[0] = day from "DD Month", groups[1] = day from "Month DD"
+            day_str = groups[0] or groups[1]
+            if day_str is None:
+                continue
+            d = int(day_str)
+            m = _extract_month_from_match(match.group())
+            if m:
+                dates.append(datetime(current_year, m, d))
         except (ValueError, OverflowError):
             continue
     return max(dates) if dates else None
@@ -286,33 +323,95 @@ def _extract_years(text: str) -> list[int]:
     return [int(y) for y in re.findall(r"\b(20[2-9]\d)\b", text)]
 
 
-def _is_expired_content(text: str) -> bool:
+def _is_expired_content(text: str, force_promo: bool = False) -> bool:
     """
     Date-first filtering: returns True if content is expired.
-    1. Has full dates → check if latest date is past → expired
-    2. Has years only → check if all years are past → expired
-    3. No dates → only filter if it looks like a time-limited event (promo keywords)
+    1. Has full dates (with year) → check if latest date is past → expired
+    2. Has years only + promo context → if current year but no full date, unverifiable → expired
+    3. Has years only (no promo) → if all years past → expired
+    4. No verifiable dates + promo context → can't verify → expired
+    5. No dates, no promo context → likely permanent content → keep
+
+    Args:
+        text: The text to check.
+        force_promo: If True, treat this text as event/promo content regardless of
+            whether it contains promo keywords. Use when the page title or URL
+            indicates the content is from an events/promotions page.
+
+    NOTE: Year-less dates (e.g. "14 July" without year) are NOT used here.
+    Snippets without years are treated as unverifiable for time-limited content,
+    because stale crawled pages often drop the year while the month/day happens
+    to fall in the future part of the current year.
     """
     current_year = datetime.now(ZoneInfo("Asia/Singapore")).year
     today = datetime.now(ZoneInfo("Asia/Singapore")).replace(
         hour=0, minute=0, second=0, microsecond=0, tzinfo=None,
     )
+    has_promo = force_promo or bool(_PROMO_EVENT_KEYWORDS.search(text))
 
-    # Check for full dates first — most reliable, applies to ALL content
+    # 1. Full dates with year — most reliable
     latest_date = _extract_latest_date(text)
     if latest_date is not None:
         return latest_date < today
 
-    # Fall back to year-only check: if all years are past, it's expired
+    # 2. Year-only check
     years = _extract_years(text)
     if years:
-        return max(years) < current_year
+        max_year = max(years)
+        if max_year < current_year:
+            return True  # All years in the past → expired
+        # Current year but no specific date + promo context → unverifiable event
+        if has_promo and max_year == current_year:
+            return True
 
-    # No dates at all — only filter if it looks like a time-limited event
-    if _PROMO_EVENT_KEYWORDS.search(text):
+    # 3. No verifiable dates — only filter if it looks like a time-limited event
+    if has_promo:
         return True  # Time-limited content with no dates — can't verify, skip
 
     return False  # No dates and no event keywords — likely a permanent store/venue page
+
+
+# Segment boundary: bullets, <br>, numbered lists, pipes, or sentence-end followed by
+# a new capitalized phrase (heuristic for multi-event snippets).
+_SEGMENT_SPLIT = re.compile(
+    r"(?:<br\s*/?>)"                        # HTML <br> tags
+    r"|(?:\n\s*\n)"                          # double newlines
+    r"|(?:\n\s*[-•●▸▹◦]\s)"                 # bullet points
+    r"|(?:\n\s*\d+[.)]\s)"                   # numbered lists
+    r"|(?:\s*\|\s*)"                          # pipe separators
+    r"|(?:\.\.\.(?:\s|$))"                   # ellipsis as separator
+    r"|(?:[.!?]\s+(?=[A-Z][a-z]))",          # sentence end → new capitalized word
+    re.IGNORECASE,
+)
+
+
+def _split_into_event_segments(text: str) -> list[str]:
+    """Split a snippet into segments, each likely describing one event/promo."""
+    segments = _SEGMENT_SPLIT.split(text)
+    return [s.strip() for s in segments if s and s.strip()]
+
+
+def _filter_snippet_segments(snippet: str, force_promo: bool = False) -> str:
+    """Filter a snippet at segment level: remove expired segments, keep the rest."""
+    segments = _split_into_event_segments(snippet)
+
+    # If splitting produced only 1 segment, fall back to whole-snippet check
+    if len(segments) <= 1:
+        return "" if _is_expired_content(snippet, force_promo=force_promo) else snippet
+
+    live_segments = []
+    for segment in segments:
+        if _is_expired_content(segment, force_promo=force_promo):
+            logger.debug(
+                "[VertexSearch] segment expired, dropping: %s", segment[:120],
+            )
+            continue
+        live_segments.append(segment)
+        logger.debug(
+            "[VertexSearch] segment kept: %s", segment[:120],
+        )
+
+    return " ".join(live_segments) if live_segments else ""
 
 
 def format_search_context(search_response: SearchResponse) -> str:
@@ -337,23 +436,32 @@ def format_search_context(search_response: SearchResponse) -> str:
     total_chars = 0
     source_idx = 0
     for result in search_response.results:
-        # Check all snippets + title combined for expired promo/event detection
-        combined_text = f"{result.title} {' '.join(result.snippets)}"
-        if _is_expired_content(combined_text):
-            logger.info(
-                "[VertexSearch] filtering expired result: %s", result.title,
-            )
-            continue
+        # If the page title or URL indicates event/promo content, force all
+        # snippets to be treated as time-limited (require verifiable dates).
+        # This catches snippets that lack promo keywords in their own text
+        # but come from an events page (e.g. "9 to 14 July with books…").
+        title_is_promo = bool(_PROMO_EVENT_KEYWORDS.search(result.title))
+        url_is_promo = bool(re.search(
+            r"/(?:event|happening|promotion|promo|whats-on|campaign)",
+            result.link, re.IGNORECASE,
+        )) if result.link else False
+        force_promo = title_is_promo or url_is_promo
 
-        # Per-snippet filtering: a single result page may mix current and past events
+        if force_promo:
+            logger.info(
+                "[VertexSearch] title/URL indicates promo page: %s (%s)",
+                result.title, result.link,
+            )
+
         live_snippets = []
         for snippet in result.snippets:
-            if _is_expired_content(snippet):
+            filtered = _filter_snippet_segments(snippet, force_promo=force_promo)
+            if not filtered:
                 logger.info(
                     "[VertexSearch] filtering expired snippet in: %s", result.title,
                 )
                 continue
-            live_snippets.append(snippet)
+            live_snippets.append(filtered)
 
         if not live_snippets:
             logger.info(
@@ -373,4 +481,9 @@ def format_search_context(search_response: SearchResponse) -> str:
         if total_chars >= _MAX_TOTAL_CONTEXT_CHARS:
             break
     parts.append("--- END CONTEXT ---")
-    return "\n".join(parts)
+    context = "\n".join(parts)
+    logger.info(
+        "[VertexSearch] context for Gemini (%d sources, %d chars):\n%s",
+        source_idx, total_chars, context,
+    )
+    return context

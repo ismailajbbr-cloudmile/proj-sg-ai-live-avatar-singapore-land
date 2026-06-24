@@ -138,6 +138,7 @@ def _promo_event_rules() -> str:
 - When listing time-limited items, always include the validity period from the context.
 - NEVER change or "update" dates from the context. If the context shows a year like {current_year - 1} or {current_year - 2}, that is the REAL year — the event is EXPIRED. Do NOT substitute the current year ({current_year}) for a past year.
 - Present dates EXACTLY as they appear in the retrieved context. If the context says "July 2024", it happened in 2024 — do NOT say "July {current_year}".
+- CRITICAL: Check EACH event/promotion individually against today's date. A snippet may contain multiple events — some current, some expired. Only mention the ones with valid future dates. Do NOT mention an event just because it appears near a current one.
 - If no current/upcoming items with confirmed dates exist after filtering, say so and suggest marinasquare.com.sg or the Level 2 information counter."""
 
 
