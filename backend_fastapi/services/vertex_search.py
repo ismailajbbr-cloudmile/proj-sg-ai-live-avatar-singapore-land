@@ -142,12 +142,25 @@ def _simplify_query(query: str) -> str | None:
     return None
 
 
+_MARINA_SQUARE_PATTERN = re.compile(
+    r"marina\s*square|滨海广场|滨海坊", re.IGNORECASE,
+)
+
+
+def _contextualize_query(query: str) -> str:
+    """Prepend 'Marina Square' if not already mentioned, for better search relevance."""
+    if _MARINA_SQUARE_PATTERN.search(query):
+        return query
+    return f"Marina Square {query}"
+
+
 async def search_datastores(query: str) -> SearchResponse:
     """Search both web and PDF datastores concurrently. Web results first."""
     # Use simplified query for Chinese questions (strip question words for better search)
     search_query = _simplify_query(query) or query
+    search_query = _contextualize_query(search_query)
     if search_query != query:
-        logger.info("[VertexSearch] simplified Chinese query %r → %r", query, search_query)
+        logger.info("[VertexSearch] query %r → %r", query, search_query)
 
     tasks = []
 
@@ -193,12 +206,14 @@ async def search_datastores(query: str) -> SearchResponse:
 
 _PROMO_EVENT_KEYWORDS = re.compile(
     r"(?:promoti|event|happening|deal|offer|sale|discount|voucher|reward|"
-    r"campaign|celebrate|festival|lucky\s*draw|giveaway|contest|"
-    r"促销|活动|优惠|折扣|抽奖|奖励)",
+    r"campaign|celebrate|festival|lucky\s*draw|giveaway|contest|competition|"
+    r"showdown|exhibit|pop.?up|roadshow|bouncy|fest\b|masterclass|workshop|"
+    r"bazaar|fair\b|showcase|carnival|cny|chinese new year|"
+    r"促销|活动|优惠|折扣|抽奖|奖励|展览|展|比赛|竞赛|挑战|快闪|路演|嘉年华|工作坊|年货|新年)",
     re.IGNORECASE,
 )
 
-# Matches date patterns like "31 Dec 2025", "December 31, 2025", "2025-12-31", "31/12/2025"
+# Matches date patterns like "31 Dec 2025", "December 31, 2025", "2025-12-31", "31/12/2025", "2025年11月2日"
 _DATE_PATTERN = re.compile(
     r"(\d{1,2})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{2,4})"  # DD/MM/YYYY or MM/DD/YYYY
     r"|(\d{4})\s*[-/]\s*(\d{1,2})\s*[-/]\s*(\d{1,2})"   # YYYY-MM-DD
@@ -207,7 +222,8 @@ _DATE_PATTERN = re.compile(
     r"\s+(\d{4})"                                          # DD Month YYYY
     r"|(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|"
     r"Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)"
-    r"\s+(\d{1,2}),?\s+(\d{4})",                          # Month DD, YYYY
+    r"\s+(\d{1,2}),?\s+(\d{4})"                           # Month DD, YYYY
+    r"|(\d{4})年(\d{1,2})月(\d{1,2})日",                    # Chinese: 2025年11月2日
     re.IGNORECASE,
 )
 
@@ -257,6 +273,9 @@ def _extract_latest_date(text: str) -> datetime | None:
                     m = _MONTH_MAP.get(month_str.group(1).lower()[:3], 0)
                     if m:
                         dates.append(datetime(y, m, d))
+            elif groups[10] is not None:  # Chinese: 2025年11月2日
+                y, m, d = int(groups[10]), int(groups[11]), int(groups[12])
+                dates.append(datetime(y, m, d))
         except (ValueError, OverflowError):
             continue
     return max(dates) if dates else None
@@ -267,30 +286,33 @@ def _extract_years(text: str) -> list[int]:
     return [int(y) for y in re.findall(r"\b(20[2-9]\d)\b", text)]
 
 
-def _is_expired_promo(snippet: str) -> bool:
+def _is_expired_content(text: str) -> bool:
     """
-    Returns True if snippet looks like a promo/event AND is expired or has no dates.
-    Non-promo content (store info, directions, etc.) is never filtered.
+    Date-first filtering: returns True if content is expired.
+    1. Has full dates → check if latest date is past → expired
+    2. Has years only → check if all years are past → expired
+    3. No dates → only filter if it looks like a time-limited event (promo keywords)
     """
-    if not _PROMO_EVENT_KEYWORDS.search(snippet):
-        return False  # Not a promo/event — keep it
-
     current_year = datetime.now(ZoneInfo("Asia/Singapore")).year
     today = datetime.now(ZoneInfo("Asia/Singapore")).replace(
         hour=0, minute=0, second=0, microsecond=0, tzinfo=None,
     )
 
-    # Check for full dates first (most reliable)
-    latest_date = _extract_latest_date(snippet)
+    # Check for full dates first — most reliable, applies to ALL content
+    latest_date = _extract_latest_date(text)
     if latest_date is not None:
         return latest_date < today
 
     # Fall back to year-only check: if all years are past, it's expired
-    years = _extract_years(snippet)
+    years = _extract_years(text)
     if years:
         return max(years) < current_year
 
-    return True  # Promo with no dates at all — can't verify, skip
+    # No dates at all — only filter if it looks like a time-limited event
+    if _PROMO_EVENT_KEYWORDS.search(text):
+        return True  # Time-limited content with no dates — can't verify, skip
+
+    return False  # No dates and no event keywords — likely a permanent store/venue page
 
 
 def format_search_context(search_response: SearchResponse) -> str:
@@ -315,6 +337,14 @@ def format_search_context(search_response: SearchResponse) -> str:
     total_chars = 0
     source_idx = 0
     for result in search_response.results:
+        # Check all snippets + title combined for expired promo/event detection
+        combined_text = f"{result.title} {' '.join(result.snippets)}"
+        if _is_expired_content(combined_text):
+            logger.info(
+                "[VertexSearch] filtering expired result: %s", result.title,
+            )
+            continue
+
         source_idx += 1
         source_tag = f"[Source {source_idx}: {result.title}] [datastore: {result.source_datastore}]"
         parts.append(source_tag)

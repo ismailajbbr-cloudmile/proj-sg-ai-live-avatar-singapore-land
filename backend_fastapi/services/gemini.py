@@ -1,7 +1,7 @@
 """
-Vertex AI Gemini streaming client with hybrid search:
-- Store/location queries → direct Vertex AI Search (deterministic)
-- Promo/event queries → Gemini built-in retrieval (richer content)
+Vertex AI Gemini streaming client.
+All factual queries use direct Vertex AI Search (deterministic).
+Small talk (greetings, thanks, etc.) skips search.
 """
 
 import logging
@@ -96,34 +96,13 @@ _SMALL_TALK_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_PROMO_EVENT_PATTERN = re.compile(
-    r"(?:"
-    r"promot|event|happening|deal|offer|sale|discount|voucher|reward|"
-    r"entertain|fun|play|activit|leisure|show|exhibit|perform|attract|"
-    r"what'?s (?:on|new|going on|happening)|what is (?:on|new|going on|happening)|"
-    r"current|upcoming|going on|special|"
-    r"促销|活动|优惠|折扣|有什么|最新|最近|"
-    r"娱乐|好玩|玩|休闲|表演|展览|节目|演出"
-    r")",
-    re.IGNORECASE,
-)
-
-
-def _grounding_rules(use_retrieval_tool: bool = False) -> str:
-    if use_retrieval_tool:
-        return """Knowledge base rules (STRICT — applies to all factual questions):
-- Answer ONLY using information retrieved from the Marina Square knowledge base (website and PDF datastores).
-- NEVER invent or guess store names, tenant locations, promotions, events, opening hours, parking rates, or facility details.
-- Do NOT rely on general world knowledge for Marina Square facts — use retrieved sources only.
-- STORE DIRECTORY SOURCE OF TRUTH: The Marina Square WEBSITE is the authoritative source for which stores and tenants currently exist in the mall, their names, and their locations. The PDF documents contain supplementary operational information only (e.g. parking, facilities, policies). If a store or tenant name appears ONLY in PDF sources but NOT in the website source, do NOT treat it as a current tenant — it may be outdated. Only confirm a store exists if it appears in the website knowledge base.
-- If retrieval returns nothing relevant from the website source, or you are unsure whether a store is currently in the mall, use gesture "tilt" and say you do not have that information. Direct the visitor to the information counter on Level 2 or Marina Square's official website.
-- Do NOT append [SHOW_QR] unless you have grounded directions to a specific in-mall tenant from the website source.
-- You MAY respond without retrieval only for greetings, thanks, goodbye, and brief clarifying questions — not for mall facts."""
+def _grounding_rules() -> str:
     return """Knowledge base rules (STRICT — applies to all factual questions):
 - Answer ONLY using the information provided in the RETRIEVED KNOWLEDGE BASE CONTEXT section below. That context contains search results from the Marina Square website and PDF datastores.
 - NEVER invent or guess store names, tenant locations, promotions, events, opening hours, parking rates, or facility details.
 - Do NOT rely on general world knowledge for Marina Square facts — use the provided context only.
-- STORE DIRECTORY SOURCE OF TRUTH: The Marina Square WEBSITE is the authoritative source for which stores and tenants currently exist in the mall, their names, and their locations. The PDF documents contain supplementary operational information only (e.g. parking, facilities, policies). If a store or tenant name appears ONLY in PDF sources but NOT in the website source, do NOT treat it as a current tenant — it may be outdated. Only confirm a store exists if it appears in the website knowledge base.
+- STORE DIRECTORY SOURCE OF TRUTH: The Marina Square WEBSITE datastore is the ONLY authoritative source for which stores and tenants currently exist in the mall. Before mentioning ANY store, restaurant, entertainment venue, or tenant by name, verify it appears in a [datastore: web] source in the context. If a name appears ONLY in [datastore: pdf] sources, do NOT treat it as a current tenant — it may be outdated.
+- TENANT VERIFICATION: When recommending food, entertainment, activities, or any category of stores, ONLY list tenants that explicitly appear in the retrieved context. Do NOT supplement with stores you "know" from general knowledge — if it's not in the context, don't mention it.
 - If the provided context contains nothing relevant, or you are unsure whether a store is currently in the mall, use gesture "tilt" and say you do not have that information. Direct the visitor to the information counter on Level 2 or Marina Square's official website.
 - Do NOT append [SHOW_QR] unless the provided context contains directions to a specific in-mall tenant.
 - You MAY respond without context only for greetings, thanks, goodbye, and brief clarifying questions — not for mall facts."""
@@ -147,25 +126,26 @@ def _session_language_instruction(language: str) -> str:
 def _promo_event_rules() -> str:
     today = datetime.now(ZoneInfo("Asia/Singapore")).strftime("%Y-%m-%d")
     current_year = datetime.now(ZoneInfo("Asia/Singapore")).year
-    return f"""Date filtering for promotions and events (today is {today}, year {current_year}):
-- Permanent stores, attractions, and venues (e.g. Timezone, Kiztopia, restaurants) can ALWAYS be mentioned regardless of dates.
-- For time-limited items (promotions, sales, temporary events, pop-ups, exhibitions):
-  • ONLY mention items whose end date is ON or AFTER {today}.
-  • If an item's end date is BEFORE {today} → EXPIRED → omit it entirely. Do NOT mention it even as a note.
+    return f"""Date and tenant filtering (today is {today}, year {current_year}):
+- ONLY mention stores, restaurants, and venues that appear in the retrieved context from [datastore: web] sources. If a tenant is not in the context, do not mention it.
+- Permanent stores and venues in the context can be mentioned regardless of dates.
+- For time-limited items (promotions, sales, temporary events, pop-ups, roadshows, exhibitions, fairs, bazaars):
+  • ONLY mention items that have a CLEAR date or date range visible in the context AND whose end date is ON or AFTER {today}.
+  • If an item has NO clear dates in the context → SKIP it entirely. Do NOT assume dates or say "no specific dates provided".
+  • If an item's end date is BEFORE {today} → EXPIRED → omit it entirely.
   • If ALL dates are in {current_year - 1} or earlier → EXPIRED → omit entirely.
-  • NEVER say "this event has ended" or "已经结束" — just leave it out.
-- When listing time-limited items, include the validity period.
-- If no current/upcoming promotions or events exist after filtering, say so and suggest marinasquare.com.sg or the Level 2 information counter."""
+  • NEVER say "this event has ended", "已经结束", or "no specific dates provided" — just leave it out.
+- When listing time-limited items, always include the validity period from the context.
+- If no current/upcoming items with confirmed dates exist after filtering, say so and suggest marinasquare.com.sg or the Level 2 information counter."""
 
 
 def _build_system_instruction(
     language: str = "en-US",
     search_context: str = "",
-    use_retrieval_tool: bool = False,
 ) -> str:
     base = (
         f"{SYSTEM_INSTRUCTION.strip()}\n\n"
-        f"{_grounding_rules(use_retrieval_tool)}\n\n"
+        f"{_grounding_rules()}\n\n"
         f"{_promo_event_rules()}\n\n"
         f"{_session_language_instruction(language)}"
     )
@@ -176,11 +156,6 @@ def _build_system_instruction(
 
 def _is_small_talk(message: str) -> bool:
     return bool(_SMALL_TALK_PATTERN.match(message.strip()))
-
-
-def _is_promo_event_query(message: str) -> bool:
-    """True when the user is asking about promotions, events, or happenings."""
-    return bool(_PROMO_EVENT_PATTERN.search(message))
 
 
 def _fallback_response(language: str) -> str:
@@ -233,56 +208,16 @@ def _is_gemini_3_family(model: str) -> bool:
     return "gemini-3" in model
 
 
-def _datastore_path(datastore_id: str) -> str:
-    return (
-        f"projects/{settings.google_vertex_project}"
-        f"/locations/global/collections/default_collection"
-        f"/dataStores/{datastore_id}"
-    )
-
-
-def _build_retrieval_tools() -> list[types.Tool]:
-    """Build Gemini retrieval tools for promo/event queries (old method)."""
-    tools: list[types.Tool] = []
-    if settings.vertex_ai_web_datastore_id:
-        tools.append(
-            types.Tool(
-                retrieval=types.Retrieval(
-                    vertex_ai_search=types.VertexAISearch(
-                        datastore=_datastore_path(settings.vertex_ai_web_datastore_id),
-                        max_results=10,
-                    )
-                )
-            )
-        )
-    if settings.vertex_ai_pdf_datastore_id:
-        tools.append(
-            types.Tool(
-                retrieval=types.Retrieval(
-                    vertex_ai_search=types.VertexAISearch(
-                        datastore=_datastore_path(settings.vertex_ai_pdf_datastore_id),
-                        max_results=5,
-                    )
-                )
-            )
-        )
-    return tools
-
-
 def _build_generate_config(
     model: str,
     language: str = "en-US",
     search_context: str = "",
-    retrieval_tools: list[types.Tool] | None = None,
 ) -> types.GenerateContentConfig:
-    use_retrieval = bool(retrieval_tools)
     kwargs: dict = {
-        "system_instruction": _build_system_instruction(language, search_context, use_retrieval),
+        "system_instruction": _build_system_instruction(language, search_context),
         "temperature": 0.0,
         "top_p": 0.95,
     }
-    if retrieval_tools:
-        kwargs["tools"] = retrieval_tools
     if _is_gemini_3_family(model):
         kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="minimal")
     return types.GenerateContentConfig(**kwargs)
@@ -359,7 +294,6 @@ async def stream_gemini_response(
     ]
 
     is_small_talk = _is_small_talk(message)
-    is_promo = _is_promo_event_query(message)
 
     if is_small_talk:
         # ── Small talk: no search needed ──
@@ -367,18 +301,9 @@ async def stream_gemini_response(
         config = _build_generate_config(model, language)
         final_text, _, elapsed = await _call_gemini(client, model, contents, config)
 
-    elif is_promo:
-        # ── Promo/event query: use Gemini built-in retrieval (richer content) ──
-        logger.info("[Gemini] promo_event_query detected, using retrieval tools")
-        retrieval_tools = _build_retrieval_tools()
-        config = _build_generate_config(
-            model, language, retrieval_tools=retrieval_tools,
-        )
-        final_text, _, elapsed = await _call_gemini(client, model, contents, config)
-
     else:
-        # ── Location/general query: use direct search (deterministic) ──
-        logger.info("[Gemini] general_query detected, using direct search")
+        # ── All factual queries: use direct search (deterministic) ──
+        logger.info("[Gemini] factual_query detected, using direct search")
         search_response: SearchResponse = await search_datastores(message)
 
         if settings.require_datastore_grounding and not search_response.results:
@@ -392,7 +317,7 @@ async def stream_gemini_response(
 
     logger.info(
         "[Gemini] model=%s stream_complete elapsed_s=%.3f mode=%s",
-        model, elapsed, "small_talk" if is_small_talk else "retrieval" if is_promo else "direct_search",
+        model, elapsed, "small_talk" if is_small_talk else "direct_search",
     )
 
     # ── Validate response ──
