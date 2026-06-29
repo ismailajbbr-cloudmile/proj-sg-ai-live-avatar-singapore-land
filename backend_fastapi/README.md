@@ -335,29 +335,75 @@ Frontend mapping: `/api/auth` → `/auth/login`, `/api/auth/me` → `/auth/me`, 
 
 SSE format: `data: {"type": "...", "value": "..."}\n\n`
 
-### Vertex AI RAG Grounding (Hybrid Search)
+### Vertex AI RAG Grounding (Direct Search)
 
 **Files:** `services/gemini.py`, `services/vertex_search.py`
 
-The chat uses a **hybrid search strategy** with two paths depending on query type:
+All non-small-talk queries use **direct Vertex AI Search** — the backend queries the datastore deterministically, filters the results, then injects the surviving context into Gemini's system prompt. Gemini never touches the datastore directly.
 
-| Query type | Detection | Search method | Rationale |
-|---|---|---|---|
-| Promo/event/entertainment | Keyword regex (`_PROMO_EVENT_PATTERN`) | Gemini built-in retrieval tools | Richer content, better for time-limited items |
-| Location/general | Everything else | Direct Discovery Engine API (`vertex_search.py`) | Deterministic, cross-lingual via search engine |
-| Small talk | Greeting/thanks regex | No search | No datastore needed |
+| Query type | Detection | What happens |
+|---|---|---|
+| Factual (stores, events, promos, directions, etc.) | Everything not matching small-talk regex | Direct Discovery Engine search → filter → inject into system prompt |
+| Small talk | Greeting/thanks regex (`_SMALL_TALK_PATTERN`) | No search — Gemini responds from system prompt only |
 
-**Direct search** (`services/vertex_search.py`):
-- Uses `SearchServiceAsyncClient` from `google-cloud-discoveryengine`
+#### Search flow (`services/vertex_search.py`)
+
+```
+User message
+  → _simplify_query()        # strip Chinese question words (在哪里, 怎么去, etc.)
+  → _contextualize_query()   # prepend "Marina Square" if not mentioned
+  → search web + PDF datastores concurrently (asyncio.gather, max 100 results each)
+  → format_search_context()  # filter expired/stale content, build context block
+  → inject into Gemini system prompt as "RETRIEVED KNOWLEDGE BASE CONTEXT"
+```
+
 - Prefers engine serving config (`VERTEX_AI_WEB_ENGINE_ID`) for cross-lingual semantic search
 - Falls back to datastore serving config (`VERTEX_AI_WEB_DATASTORE_ID`) if no engine
-- Searches web + PDF datastores concurrently via `asyncio.gather`
-- Chinese question words (在哪里, 怎么去, etc.) are stripped before searching for better results
-- Results formatted into a context block injected into the system prompt
+- Results capped at `max_results` per datastore to avoid iterating thousands of pages
 
-**Gemini retrieval** (promo/event queries):
-- Attaches Vertex AI Search retrieval tools directly to the Gemini request
-- System prompt includes date filtering rules to suppress expired promotions
+#### Date & expiry filtering (`_is_expired_content`)
+
+The datastore contains a mix of current and stale content (old events, closed pop-ups, expired promotions). A multi-layer filter in `format_search_context()` prevents stale content from reaching Gemini:
+
+| Layer | What it checks | Example filtered |
+|---|---|---|
+| **Full dates with year** | `_extract_latest_date()` — if latest date is past → expired | "Book Fair 9-14 July **2024**" |
+| **Year only + promo keyword** | Current year but no month/day + event keyword → unverifiable | "SIMBA Roadshow **2026**" (no specific date) |
+| **Past year** | All years in text < current year → expired | "Great Sale **2024** promotion" |
+| **Year-less dates + promo keyword** | "DD Month" without year + event keyword → stale signal | "Book Fair 9 to 14 July" (no year, "fair" keyword) |
+| **No dates + promo keyword** | Event/promo keywords but no verifiable date → unverifiable | "Amazing Sale!" (no date at all) |
+| **Title/URL promo detection** | Page title or URL indicates event/promo page → force all snippets to require verifiable dates | Title "Singapore's Largest Travel Goods Fair" → all snippets treated as time-limited |
+| **Excluded tenants** | `_EXCLUDED_TENANTS` blocklist for closed/departed stores | "Play Nation" (closed pop-up) |
+| **Short/empty snippets** | Snippets < 20 chars after stripping HTML → noise | "logo.", "Central Atrium" |
+| **Segment splitting** | Multi-event snippets split on boundaries (bullets, `<br>`, sentence ends) → each segment filtered independently | Mixed snippet with both current and expired events |
+
+Promo/event keyword regex (`_PROMO_EVENT_KEYWORDS`) covers: promotions, events, sales, fairs, festivals, roadshows, competitions, bazaars, challenges, etc. — in both English and Chinese.
+
+Date regex supports: `DD/MM/YYYY`, `YYYY-MM-DD`, `DD Month YYYY`, `Month DD, YYYY`, ordinals (`14th`), and Chinese dates (`2025年12月12日`).
+
+#### Chinese vs English query differences
+
+The Vertex AI Search engine returns **different snippet text** for Chinese vs English queries against the same English-language datastore. Key differences:
+
+| Aspect | English query | Chinese query |
+|---|---|---|
+| Snippet dates | Often include the year (e.g., "1 June - 31 August **2026**") | Often omit the year (e.g., "1 June to 31 August") |
+| Filtering impact | Full dates pass step 1 → kept | Year-less dates without promo keywords → kept (rely on Gemini's date rules in system prompt) |
+| Result ranking | Promotion pages rank higher | Generic "Marina Square" pages may rank higher |
+
+This is a Vertex AI Search behavior, not a code issue. The filtering logic accounts for it by only treating year-less dates as stale when combined with promo keywords (to avoid filtering valid current promotions whose Chinese snippets lack the year).
+
+#### System prompt structure (`services/gemini.py`)
+
+The system prompt is built from several components concatenated together:
+
+1. **`SYSTEM_INSTRUCTION`** — persona, gesture rules, QR code rules, OUTSIDE store disambiguation, formatting rules
+2. **`_grounding_rules()`** — strict knowledge-base-only answering, store directory source of truth, tenant verification
+3. **`_promo_event_rules()`** — date filtering instructions for Gemini (today's date injected, rules about expired items)
+4. **`_session_language_instruction()`** — language preference (English or Simplified Chinese)
+5. **Search context** (if available) — the filtered `RETRIEVED KNOWLEDGE BASE CONTEXT` block from `vertex_search.py`
+
+#### Env vars
 
 | Env var | Content |
 |---|---|
@@ -365,6 +411,7 @@ The chat uses a **hybrid search strategy** with two paths depending on query typ
 | `VERTEX_AI_WEB_DATASTORE_ID` | Website datastore (fallback if no engine) |
 | `VERTEX_AI_PDF_DATASTORE_ID` | PDF documents (supplementary) |
 | `REQUIRE_DATASTORE_GROUNDING` | When `true`, return fallback if no search results (default `true`) |
+| `GEMINI_CHAT_MODEL` | Model name (default `gemini-2.5-flash`) |
 
 - Location is always `global` for Vertex AI Search (not `us-central1`).
 - Empty IDs = no grounding (Gemini uses system prompt only).

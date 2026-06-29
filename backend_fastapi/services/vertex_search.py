@@ -162,6 +162,39 @@ _MARINA_SQUARE_PATTERN = re.compile(
 )
 
 
+# Chinese terms that don't cross-lingual search well → append English equivalent
+_ZH_EN_FACILITY_MAP: dict[str, str] = {
+    "哺乳室": "nursing room",
+    "母婴室": "nursing room",
+    "育婴室": "nursing room",
+    "卫生间": "toilet restroom",
+    "洗手间": "toilet restroom",
+    "厕所": "toilet restroom",
+    "停车场": "parking carpark",
+    "停车": "parking carpark",
+    "电梯": "elevator lift",
+    "扶梯": "escalator",
+    "自动扶梯": "escalator",
+    "问询处": "information counter",
+    "服务台": "customer service counter",
+    "失物招领": "lost and found",
+    "营业时间": "opening hours",
+    "轮椅": "wheelchair",
+    "无障碍": "accessible",
+}
+
+
+def _augment_chinese_query(query: str) -> str:
+    """Append English equivalents for Chinese facility terms that don't search well."""
+    additions = []
+    for zh, en in _ZH_EN_FACILITY_MAP.items():
+        if zh in query:
+            additions.append(en)
+    if additions:
+        return f"{query} {' '.join(additions)}"
+    return query
+
+
 def _contextualize_query(query: str) -> str:
     """Prepend 'Marina Square' if not already mentioned, for better search relevance."""
     if _MARINA_SQUARE_PATTERN.search(query):
@@ -170,54 +203,37 @@ def _contextualize_query(query: str) -> str:
 
 
 async def search_datastores(query: str) -> SearchResponse:
-    """Search both web and PDF datastores concurrently. Web results first."""
+    """Search web datastore via engine or raw datastore."""
     # Use simplified query for Chinese questions (strip question words for better search)
     search_query = _simplify_query(query) or query
+    search_query = _augment_chinese_query(search_query)
     search_query = _contextualize_query(search_query)
     if search_query != query:
         logger.info("[VertexSearch] query %r → %r", query, search_query)
 
-    tasks = []
-
-    # Web: prefer engine (cross-lingual semantic search) over raw datastore
-    # Use 50 results to find current events buried past generic "Marina Square" pages
+    # Prefer engine (cross-lingual semantic search) over raw datastore
     if settings.vertex_ai_web_engine_id:
-        tasks.append(_search(
+        results = await _search(
             search_query,
             serving_config=_engine_serving_config(settings.vertex_ai_web_engine_id),
             source_label="web",
             max_results=100,
-        ))
+        )
     elif settings.vertex_ai_web_datastore_id:
-        tasks.append(_search(
+        results = await _search(
             search_query,
             serving_config=_datastore_serving_config(settings.vertex_ai_web_datastore_id),
             source_label="web",
             max_results=100,
-        ))
-
-    if settings.vertex_ai_pdf_datastore_id:
-        tasks.append(_search(
-            search_query,
-            serving_config=_datastore_serving_config(settings.vertex_ai_pdf_datastore_id),
-            source_label="pdf",
-            max_results=5,
-        ))
-
-    all_results: list[SearchResult] = []
-    if tasks:
-        gathered = await asyncio.gather(*tasks)
-        for result_list in gathered:
-            all_results.extend(result_list)
+        )
+    else:
+        results = []
 
     logger.info(
-        "[VertexSearch] query=%r total_results=%d (web=%d, pdf=%d)",
-        query,
-        len(all_results),
-        sum(1 for r in all_results if r.source_datastore == "web"),
-        sum(1 for r in all_results if r.source_datastore == "pdf"),
+        "[VertexSearch] query=%r total_results=%d",
+        query, len(results),
     )
-    return SearchResponse(results=all_results, query=query)
+    return SearchResponse(results=results, query=query)
 
 
 _PROMO_EVENT_KEYWORDS = re.compile(

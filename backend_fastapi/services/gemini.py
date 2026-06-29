@@ -139,6 +139,7 @@ def _promo_event_rules() -> str:
 - NEVER change or "update" dates from the context. If the context shows a year like {current_year - 1} or {current_year - 2}, that is the REAL year — the event is EXPIRED. Do NOT substitute the current year ({current_year}) for a past year.
 - Present dates EXACTLY as they appear in the retrieved context. If the context says "July 2024", it happened in 2024 — do NOT say "July {current_year}".
 - CRITICAL: Check EACH event/promotion individually against today's date. A snippet may contain multiple events — some current, some expired. Only mention the ones with valid future dates. Do NOT mention an event just because it appears near a current one.
+- NEVER combine or transfer dates from one source to another. Each promotion's dates must come from the SAME source snippet. If a snippet mentions a discount but has no date, do NOT borrow a date from a different source.
 - If no current/upcoming items with confirmed dates exist after filtering, say so and suggest marinasquare.com.sg or the Level 2 information counter."""
 
 
@@ -195,7 +196,7 @@ def _model_already_refused(text: str) -> bool:
 
 
 def _has_datastore_config() -> bool:
-    return bool(settings.vertex_ai_web_datastore_id or settings.vertex_ai_pdf_datastore_id)
+    return bool(settings.vertex_ai_web_engine_id or settings.vertex_ai_web_datastore_id)
 
 
 def _get_client() -> genai.Client:
