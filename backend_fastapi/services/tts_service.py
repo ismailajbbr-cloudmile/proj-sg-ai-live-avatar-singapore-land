@@ -4,12 +4,15 @@ Returns audio + viseme frames (linear-estimated timing; Gemini TTS returns no ti
 """
 import asyncio
 import base64
+import logging
 from functools import partial
 
 from google.cloud import texttospeech
 
 from config import settings
 from services.viseme import build_viseme_frames
+
+logger = logging.getLogger(__name__)
 
 
 def _create_client() -> texttospeech.TextToSpeechClient:
@@ -35,7 +38,15 @@ def _tts_language_code(language: str) -> str:
     return language
 
 
+_EMPTY_RESULT = {"audioBase64": "", "mimeType": "audio/mpeg", "visemes": []}
+
+
 async def synthesize(text: str, language: str = "en-US") -> dict:
+    # Skip very short text (likely gesture word leak like "tilt", "idle")
+    if len(text.strip()) < 5:
+        logger.warning("[TTS] text too short, skipping: %r", text)
+        return _EMPTY_RESULT
+
     words = _segment_words(text, language)
     if not words:
         raise ValueError("text is required")

@@ -223,7 +223,7 @@ def _build_generate_config(
         "top_p": 0.95,
     }
     if _is_gemini_3_family(model):
-        kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="minimal")
+        kwargs["thinking_config"] = types.ThinkingConfig(thinking_level="low")
     return types.GenerateContentConfig(**kwargs)
 
 

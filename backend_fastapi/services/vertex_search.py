@@ -16,8 +16,9 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-_MAX_SNIPPET_CHARS = 1000
+_MAX_SNIPPET_CHARS = 2000
 _MAX_TOTAL_CONTEXT_CHARS = 15000
+_MAX_CONTEXT_SOURCES = 20  # Cap sources to reduce noise for the model
 
 # Closed/departed tenants — filter out snippets mentioning these names.
 # Maintains accuracy when the datastore still has stale pages for former tenants.
@@ -92,7 +93,7 @@ async def _search(
     if use_extractive_answers:
         content_spec_kwargs["extractive_content_spec"] = (
             discoveryengine.SearchRequest.ContentSearchSpec.ExtractiveContentSpec(
-                max_extractive_answer_count=3,
+                max_extractive_answer_count=5,
             )
         )
 
@@ -195,6 +196,26 @@ def _augment_chinese_query(query: str) -> str:
     return query
 
 
+# Short promo/event queries that need expansion for better search ranking
+_QUERY_EXPANSION: dict[str, str] = {
+    "promos": "current promotions deals offers",
+    "promo": "current promotions deals offers",
+    "促销": "promotions deals 优惠",
+    "优惠": "promotions deals 促销",
+    "events": "upcoming events happenings activities",
+    "活动": "events happenings 活动",
+}
+
+
+def _expand_query(query: str) -> str:
+    """Expand short promo/event queries to help search engine find the right pages."""
+    lower = query.strip().lower()
+    expansion = _QUERY_EXPANSION.get(lower)
+    if expansion:
+        return f"{query} {expansion}"
+    return query
+
+
 def _contextualize_query(query: str) -> str:
     """Prepend 'Marina Square' if not already mentioned, for better search relevance."""
     if _MARINA_SQUARE_PATTERN.search(query):
@@ -206,18 +227,21 @@ async def search_datastores(query: str) -> SearchResponse:
     """Search web datastore via engine or raw datastore."""
     # Use simplified query for Chinese questions (strip question words for better search)
     search_query = _simplify_query(query) or query
+    search_query = _expand_query(search_query)
     search_query = _augment_chinese_query(search_query)
     search_query = _contextualize_query(search_query)
     if search_query != query:
         logger.info("[VertexSearch] query %r → %r", query, search_query)
 
     # Prefer engine (cross-lingual semantic search) over raw datastore
+    # Enable extractive answers for fuller passages (includes dates for better filtering)
     if settings.vertex_ai_web_engine_id:
         results = await _search(
             search_query,
             serving_config=_engine_serving_config(settings.vertex_ai_web_engine_id),
             source_label="web",
             max_results=100,
+            use_extractive_answers=True,
         )
     elif settings.vertex_ai_web_datastore_id:
         results = await _search(
@@ -225,15 +249,22 @@ async def search_datastores(query: str) -> SearchResponse:
             serving_config=_datastore_serving_config(settings.vertex_ai_web_datastore_id),
             source_label="web",
             max_results=100,
+            use_extractive_answers=True,
         )
     else:
         results = []
 
+    # Filter: only keep web results (drop PDF sources from blended engine)
+    web_results = [r for r in results if "marinasquare.com.sg" in r.link]
+
+    # Re-rank: prioritize article/content pages over generic/template pages
+    web_results.sort(key=lambda r: 0 if "/articles/" in r.link else 1)
+
     logger.info(
-        "[VertexSearch] query=%r total_results=%d",
-        query, len(results),
+        "[VertexSearch] query=%r total_results=%d (web=%d, dropped_pdf=%d)",
+        query, len(results), len(web_results), len(results) - len(web_results),
     )
-    return SearchResponse(results=results, query=query)
+    return SearchResponse(results=web_results, query=query)
 
 
 _PROMO_EVENT_KEYWORDS = re.compile(
@@ -355,101 +386,33 @@ def _extract_years(text: str) -> list[int]:
     return [int(y) for y in re.findall(r"\b(20[2-9]\d)\b", text)]
 
 
-def _is_expired_content(text: str, force_promo: bool = False) -> bool:
+def _is_expired_content(text: str) -> bool:
     """
-    Date-first filtering: returns True if content is expired.
-    1. Has full dates (with year) → check if latest date is past → expired
-    2. Has years only + promo context → if current year but no full date, unverifiable → expired
-    3. Has years only (no promo) → if all years past → expired
-    4. No verifiable dates + promo context → can't verify → expired
-    5. No dates, no promo context → likely permanent content → keep
+    Simple expiry check: only filter content with explicit past dates.
+    Everything else passes through — Gemini handles ambiguous content
+    via system prompt date-filtering rules.
 
-    Args:
-        text: The text to check.
-        force_promo: If True, treat this text as event/promo content regardless of
-            whether it contains promo keywords. Use when the page title or URL
-            indicates the content is from an events/promotions page.
-
-    NOTE: Year-less dates (e.g. "14 July" without year) are NOT used here.
-    Snippets without years are treated as unverifiable for time-limited content,
-    because stale crawled pages often drop the year while the month/day happens
-    to fall in the future part of the current year.
+    1. Has full dates with year → if latest date is past → expired
+    2. Has years only → if all years < current year → expired
+    3. Everything else → keep
     """
     current_year = datetime.now(ZoneInfo("Asia/Singapore")).year
     today = datetime.now(ZoneInfo("Asia/Singapore")).replace(
         hour=0, minute=0, second=0, microsecond=0, tzinfo=None,
     )
-    has_promo = force_promo or bool(_PROMO_EVENT_KEYWORDS.search(text))
 
     # 1. Full dates with year — most reliable
     latest_date = _extract_latest_date(text)
     if latest_date is not None:
         return latest_date < today
 
-    # 2. Year-only check
+    # 2. All years in the past → expired
     years = _extract_years(text)
-    if years:
-        max_year = max(years)
-        if max_year < current_year:
-            return True  # All years in the past → expired
-        # Current year but no specific date + promo context → unverifiable event
-        if has_promo and max_year == current_year:
-            return True
-
-    # 3. Year-less dates like "9 to 14 July", "14th November" — no year found.
-    #    Permanent store pages don't use "DD Month" patterns; events do.
-    #    Treat as stale event content regardless of promo keywords.
-    if _extract_latest_date_no_year(text) is not None:
+    if years and max(years) < current_year:
         return True
 
-    # 4. No verifiable dates — only filter if it looks like a time-limited event
-    if has_promo:
-        return True  # Time-limited content with no dates — can't verify, skip
-
-    return False  # No dates and no event keywords — likely a permanent store/venue page
-
-
-# Segment boundary: bullets, <br>, numbered lists, pipes, or sentence-end followed by
-# a new capitalized phrase (heuristic for multi-event snippets).
-_SEGMENT_SPLIT = re.compile(
-    r"(?:<br\s*/?>)"                        # HTML <br> tags
-    r"|(?:\n\s*\n)"                          # double newlines
-    r"|(?:\n\s*[-•●▸▹◦]\s)"                 # bullet points
-    r"|(?:\n\s*\d+[.)]\s)"                   # numbered lists
-    r"|(?:\s*\|\s*)"                          # pipe separators
-    r"|(?:\.\.\.(?:\s|$))"                   # ellipsis as separator
-    r"|(?:[.!?]\s+(?=[A-Z][a-z]))",          # sentence end → new capitalized word
-    re.IGNORECASE,
-)
-
-
-def _split_into_event_segments(text: str) -> list[str]:
-    """Split a snippet into segments, each likely describing one event/promo."""
-    segments = _SEGMENT_SPLIT.split(text)
-    return [s.strip() for s in segments if s and s.strip()]
-
-
-def _filter_snippet_segments(snippet: str, force_promo: bool = False) -> str:
-    """Filter a snippet at segment level: remove expired segments, keep the rest."""
-    segments = _split_into_event_segments(snippet)
-
-    # If splitting produced only 1 segment, fall back to whole-snippet check
-    if len(segments) <= 1:
-        return "" if _is_expired_content(snippet, force_promo=force_promo) else snippet
-
-    live_segments = []
-    for segment in segments:
-        if _is_expired_content(segment, force_promo=force_promo):
-            logger.debug(
-                "[VertexSearch] segment expired, dropping: %s", segment[:120],
-            )
-            continue
-        live_segments.append(segment)
-        logger.debug(
-            "[VertexSearch] segment kept: %s", segment[:120],
-        )
-
-    return " ".join(live_segments) if live_segments else ""
+    # 3. Everything else → keep (let Gemini handle via system prompt)
+    return False
 
 
 def format_search_context(search_response: SearchResponse) -> str:
@@ -459,6 +422,7 @@ def format_search_context(search_response: SearchResponse) -> str:
 
     today_obj = datetime.now(ZoneInfo("Asia/Singapore"))
     today = today_obj.strftime("%Y-%m-%d")
+    today_dt = today_obj.replace(hour=0, minute=0, second=0, microsecond=0, tzinfo=None)
     current_year = today_obj.year
     parts = [
         "--- RETRIEVED KNOWLEDGE BASE CONTEXT ---",
@@ -473,23 +437,10 @@ def format_search_context(search_response: SearchResponse) -> str:
     ]
     total_chars = 0
     source_idx = 0
+    seen_snippets: set[str] = set()  # Deduplicate identical snippet text
     for result in search_response.results:
-        # If the page title or URL indicates event/promo content, force all
-        # snippets to be treated as time-limited (require verifiable dates).
-        # This catches snippets that lack promo keywords in their own text
-        # but come from an events page (e.g. "9 to 14 July with books…").
-        title_is_promo = bool(_PROMO_EVENT_KEYWORDS.search(result.title))
-        url_is_promo = bool(re.search(
-            r"/(?:event|happening|promotion|promo|whats-on|campaign)",
-            result.link, re.IGNORECASE,
-        )) if result.link else False
-        force_promo = title_is_promo or url_is_promo
-
-        if force_promo:
-            logger.info(
-                "[VertexSearch] title/URL indicates promo page: %s (%s)",
-                result.title, result.link,
-            )
+        if source_idx >= _MAX_CONTEXT_SOURCES:
+            break
 
         # Skip results that mention excluded (closed/departed) tenants
         combined_text = f"{result.title} {' '.join(result.snippets)}"
@@ -499,27 +450,30 @@ def format_search_context(search_response: SearchResponse) -> str:
             )
             continue
 
+        # Filter snippets: clean, deduplicate, remove explicitly expired
         live_snippets = []
         for snippet in result.snippets:
-            # Skip empty or too-short snippets (noise from the datastore)
             clean = re.sub(r"<[^>]+>|&\w+;", "", snippet).strip()
             if len(clean) < 20:
                 continue
-            filtered = _filter_snippet_segments(snippet, force_promo=force_promo)
-            if not filtered:
+            if clean in seen_snippets:
+                continue
+            seen_snippets.add(clean)
+            if _is_expired_content(snippet):
                 logger.info(
-                    "[VertexSearch] filtering expired snippet in: %s", result.title,
+                    "[VertexSearch] expired snippet in: %s | %s", result.title, result.link,
                 )
                 continue
-            live_snippets.append(filtered)
+            live_snippets.append(snippet)
 
         if not live_snippets:
             logger.info(
-                "[VertexSearch] all snippets expired, dropping result: %s", result.title,
+                "[VertexSearch] all snippets expired, dropping: %s | %s", result.title, result.link,
             )
             continue
 
         source_idx += 1
+        logger.info("[VertexSearch] kept #%d: %s | %s", source_idx, result.title, result.link)
         source_tag = f"[Source {source_idx}: {result.title}] [datastore: {result.source_datastore}]"
         parts.append(source_tag)
         for snippet in live_snippets:

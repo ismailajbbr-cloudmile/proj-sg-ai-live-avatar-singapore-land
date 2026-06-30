@@ -1,21 +1,16 @@
-"""Tests for vertex_search date filtering and segment splitting."""
+"""Tests for vertex_search date filtering."""
 
 from datetime import datetime
 from unittest.mock import patch
 from zoneinfo import ZoneInfo
 
-import pytest
-
 from services.vertex_search import (
     _extract_latest_date,
-    _extract_latest_date_no_year,
     _is_expired_content,
-    _split_into_event_segments,
-    _filter_snippet_segments,
 )
 
-# Fix "today" to 2026-06-24 for deterministic tests
-_FIXED_NOW = datetime(2026, 6, 24, 12, 0, 0, tzinfo=ZoneInfo("Asia/Singapore"))
+# Fix "today" to 2026-06-30 for deterministic tests
+_FIXED_NOW = datetime(2026, 6, 30, 12, 0, 0, tzinfo=ZoneInfo("Asia/Singapore"))
 
 
 def _patch_now():
@@ -26,7 +21,7 @@ def _patch_now():
     )
 
 
-# ── _extract_latest_date (full dates with year) ──
+# ── _extract_latest_date ──
 
 
 class TestExtractLatestDate:
@@ -35,9 +30,6 @@ class TestExtractLatestDate:
 
     def test_ordinal_dd_month_yyyy(self):
         assert _extract_latest_date("14th July 2024") == datetime(2024, 7, 14)
-
-    def test_1st_ordinal(self):
-        assert _extract_latest_date("1st January 2026") == datetime(2026, 1, 1)
 
     def test_date_range_picks_latest(self):
         assert _extract_latest_date("From 9 to 14 July 2024") == datetime(2024, 7, 14)
@@ -51,52 +43,16 @@ class TestExtractLatestDate:
     def test_no_dates(self):
         assert _extract_latest_date("Starbucks Level 1") is None
 
-    def test_en_dash_range(self):
-        # "5 – 28 June 2026" — the "28 June 2026" should match
-        assert _extract_latest_date("5 – 28 June 2026") == datetime(2026, 6, 28)
-
-    def test_ordinal_with_year(self):
-        assert _extract_latest_date("17th November 2025") == datetime(2025, 11, 17)
+    def test_chinese_date(self):
+        assert _extract_latest_date("2025年12月12日") == datetime(2025, 12, 12)
 
 
-# ── _extract_latest_date_no_year ──
-
-
-class TestExtractLatestDateNoYear:
-    def test_dd_month(self):
-        with _patch_now():
-            assert _extract_latest_date_no_year("14 July") == datetime(2026, 7, 14)
-
-    def test_ordinal_dd_month(self):
-        with _patch_now():
-            assert _extract_latest_date_no_year("14th July") == datetime(2026, 7, 14)
-
-    def test_range_picks_latest(self):
-        with _patch_now():
-            # "9 to 14 July" — should find both 9 July and 14 July (if "July" appears after both)
-            # Actually only "14 July" matches since "9 to" doesn't have a month after it
-            result = _extract_latest_date_no_year("9 to 14 July")
-            assert result == datetime(2026, 7, 14)
-
-    def test_cross_month_range(self):
-        with _patch_now():
-            result = _extract_latest_date_no_year("14 July to 15 August")
-            assert result == datetime(2026, 8, 15)
-
-    def test_no_dates(self):
-        with _patch_now():
-            assert _extract_latest_date_no_year("Starbucks Level 1") is None
-
-    def test_28_sep(self):
-        with _patch_now():
-            result = _extract_latest_date_no_year("28 & 29 Sep")
-            assert result == datetime(2026, 9, 29)
-
-
-# ── _is_expired_content ──
+# ── _is_expired_content (simplified) ──
 
 
 class TestIsExpiredContent:
+    """Only explicit past dates and past years are filtered. Everything else passes."""
+
     def test_expired_full_date(self):
         with _patch_now():
             assert _is_expired_content("Book Fair 9 to 14 July 2024") is True
@@ -109,219 +65,57 @@ class TestIsExpiredContent:
         with _patch_now():
             assert _is_expired_content("Great Sale 2024 promotion") is True
 
-    def test_current_year_only_with_promo_keyword(self):
-        """Current year but no month/day + promo keyword = unverifiable = expired."""
+    def test_current_year_passes(self):
+        """Current year without full date → kept (let Gemini handle)."""
         with _patch_now():
-            assert _is_expired_content("SIMBA Roadshow 2026") is True
+            assert _is_expired_content("SIMBA Roadshow 2026") is False
 
-    def test_current_year_only_no_promo_keyword(self):
-        """Current year without promo keyword = keep (likely permanent content)."""
+    def test_future_year_passes(self):
         with _patch_now():
-            assert _is_expired_content("Marina Square 2026 tenant list") is False
-
-    def test_no_dates_promo_keyword(self):
-        with _patch_now():
-            assert _is_expired_content("Amazing Sale!") is True
+            assert _is_expired_content("Event 2027") is False
 
     def test_no_dates_no_keywords(self):
+        """No dates at all → kept."""
         with _patch_now():
             assert _is_expired_content("Starbucks, Level 1") is False
 
+    def test_no_dates_with_promo_keyword(self):
+        """No dates + promo keyword → kept (Gemini handles)."""
+        with _patch_now():
+            assert _is_expired_content("Amazing Sale!") is False
+
     def test_event_ending_today(self):
         with _patch_now():
-            assert _is_expired_content("Event ends 24 June 2026") is False
+            assert _is_expired_content("Event ends 30 June 2026") is False
 
     def test_event_ended_yesterday(self):
         with _patch_now():
-            assert _is_expired_content("Event ends 23 June 2026") is True
+            assert _is_expired_content("Event ends 29 June 2026") is True
 
-    # ── Year-less date tests ──
-    # Year-less dates with promo keywords are ALWAYS filtered as unverifiable.
-    # Stale crawled pages often drop the year, so we can't trust month/day alone.
-
-    def test_yearless_future_month_with_keyword_filtered(self):
-        """'Book Fair 9 to 14 July' — no year + promo keyword = unverifiable = filtered."""
+    def test_yearless_dates_pass(self):
+        """Year-less dates → kept (no explicit past date)."""
         with _patch_now():
-            assert _is_expired_content("Book Fair 9 to 14 July") is True
+            assert _is_expired_content("Book Fair 9 to 14 July") is False
 
-    def test_yearless_past_month_with_keyword_filtered(self):
-        """'CNY Bazaar 15 February' — no year + promo keyword = filtered."""
-        with _patch_now():
-            assert _is_expired_content("CNY Bazaar 15 February") is True
-
-    def test_yearless_no_keyword_still_filtered(self):
-        """Year-less dates are treated as stale event signal regardless of keywords."""
-        with _patch_now():
-            assert _is_expired_content("Open since 15 March") is True
-
-    def test_travel_goods_fair_no_year(self):
-        """Travel Goods Fair 23 Jul to 4 Aug — no year + 'fair' keyword = filtered."""
+    def test_store_page_passes(self):
+        """Store descriptions always pass."""
         with _patch_now():
             assert _is_expired_content(
-                "Singapore's Largest Travel Goods Fair 23 Jul to 4 Aug"
-            ) is True
+                "Timezone is the world's leading fun family interactive entertainment centre"
+            ) is False
 
-    def test_cny_bazaar_2026(self):
-        """CNY Festive Goodies Bazaar 2026 — year only + promo keyword = unverifiable."""
+    def test_upcoming_events_snippet_passes(self):
+        """Upcoming Events page snippets with no year pass through."""
         with _patch_now():
-            assert _is_expired_content("CNY Festive Goodies Bazaar 2026") is True
+            assert _is_expired_content(
+                "Participating retailers include: Dian Xiao Er, Ergoworks"
+            ) is False
 
-    def test_ai_cube_master_2026(self):
-        """AI Cube Master 2026 Challenge — year only + keyword = unverifiable."""
+    def test_chinese_expired_date(self):
         with _patch_now():
-            assert _is_expired_content("AI Cube Master 2026 Challenge") is True
+            assert _is_expired_content("活动 2025年12月12日至2026年1月1日") is True
 
-    def test_chan_brothers_fiesta_no_year(self):
-        """No year + 'fiesta'/'anniversary' keywords = unverifiable = filtered."""
+    def test_mixed_years_latest_wins(self):
+        """If latest date is future, not expired."""
         with _patch_now():
-            assert _is_expired_content("Chan Brothers 59th Anniversary Fiesta 28 & 29 Sep") is True
-
-    def test_chan_brothers_fiesta_with_year(self):
-        """With full date including year — use the date to decide."""
-        with _patch_now():
-            assert _is_expired_content("Chan Brothers Fiesta 29 Sep 2026") is False
-
-    # ── force_promo tests (title-as-context) ──
-
-    def test_force_promo_no_keyword_snippet_filtered(self):
-        """Snippet has no promo keywords, but force_promo=True from title → filtered."""
-        with _patch_now():
-            # This snippet has year-less dates → now always filtered
-            text = "from 9 to 14 July with a wide selection of children's books at great prices"
-            assert _is_expired_content(text) is True  # year-less date = stale signal
-            assert _is_expired_content(text, force_promo=True) is True  # also filtered
-
-    def test_force_promo_with_full_future_date_kept(self):
-        """force_promo + full future date → still kept (date is verifiable)."""
-        with _patch_now():
-            text = "Great deals at Linkbridge 14 July 2026"
-            assert _is_expired_content(text, force_promo=True) is False
-
-    def test_force_promo_with_full_past_date_filtered(self):
-        """force_promo + full past date → filtered."""
-        with _patch_now():
-            text = "Great deals at Linkbridge 14 November 2025"
-            assert _is_expired_content(text, force_promo=True) is True
-
-    def test_force_promo_no_dates_filtered(self):
-        """force_promo + no dates at all → filtered (unverifiable)."""
-        with _patch_now():
-            text = "14th to 17th November at Linkbridge, Level 2"
-            assert _is_expired_content(text, force_promo=True) is True
-
-    # ── Real snippets from logs ──
-
-    def test_real_book_fair_snippet(self):
-        """Actual snippet from datastore — Book Fair with no year."""
-        with _patch_now():
-            text = (
-                "Join us @ Marina Square Level 2, Marina Foyer atrium, "
-                "from 9 to 14 July with a wide selection of children's "
-                "and adult books at great prices"
-            )
-            assert _is_expired_content(text) is True
-
-    def test_real_lg_tv_snippet(self):
-        """Actual snippet from datastore — LG TV event with no year."""
-        with _patch_now():
-            text = (
-                "Discover Unmatched Quality and Immersive Viewing with "
-                "LG's QNED and OLED TV at Marina Square Linkbridge, "
-                "Level 2, from 14th to 17th November"
-            )
-            assert _is_expired_content(text) is True
-
-    def test_real_september_event_snippet(self):
-        """Actual snippet — 'from 10 to 15 September' with no year."""
-        with _patch_now():
-            text = (
-                "Join us at the Central Atrium from 10 to 15 September, "
-                "and then catch us at the Marina Foyer Atrium from 16 to 29"
-            )
-            assert _is_expired_content(text) is True
-
-
-# ── _split_into_event_segments ──
-
-
-def test_split_on_sentence_boundary():
-    text = "Book Fair from 9 to 14 July 2024. Summer Sale from 1 June to 31 August 2026"
-    segments = _split_into_event_segments(text)
-    assert len(segments) == 2
-    assert "Book Fair" in segments[0]
-    assert "Summer Sale" in segments[1]
-
-
-def test_split_on_br_tag():
-    text = "Book Fair 9-14 July 2024<br>Summer Sale 1 June - 31 August 2026"
-    segments = _split_into_event_segments(text)
-    assert len(segments) == 2
-
-
-def test_split_on_bullets():
-    text = "Events:\n- Book Fair 9-14 July 2024\n- Summer Sale 1 June - 31 Aug 2026"
-    segments = _split_into_event_segments(text)
-    assert len(segments) >= 2
-
-
-def test_no_split_single_event():
-    text = "Book Fair from 9 to 14 July 2024 at Marina Foyer"
-    segments = _split_into_event_segments(text)
-    assert len(segments) == 1
-
-
-# ── _filter_snippet_segments ──
-
-
-class TestFilterSnippetSegments:
-    def test_mixed_content_keeps_current_only(self):
-        with _patch_now():
-            snippet = "Book Fair from 9 to 14 July 2024. Summer Sale from 1 June to 31 August 2026"
-            result = _filter_snippet_segments(snippet)
-            assert "Summer Sale" in result
-            assert "Book Fair" not in result
-
-    def test_all_expired(self):
-        with _patch_now():
-            snippet = "Book Fair 9-14 July 2024<br>Spring Sale ends 1 March 2025"
-            result = _filter_snippet_segments(snippet)
-            assert result == ""
-
-    def test_all_current(self):
-        with _patch_now():
-            snippet = "Summer Sale 1 June to 31 August 2026. Holiday Promo 1-31 December 2026"
-            result = _filter_snippet_segments(snippet)
-            assert "Summer Sale" in result
-            assert "Holiday Promo" in result
-
-    def test_single_expired_segment(self):
-        with _patch_now():
-            snippet = "Junior Page Book Fair 9 to 14 July 2024"
-            result = _filter_snippet_segments(snippet)
-            assert result == ""
-
-    def test_single_current_segment(self):
-        with _patch_now():
-            snippet = "Summer Sale 1 June to 31 August 2026"
-            result = _filter_snippet_segments(snippet)
-            assert "Summer Sale" in result
-
-    def test_permanent_store_passes(self):
-        with _patch_now():
-            snippet = "Starbucks is located at Level 1, near the main entrance"
-            result = _filter_snippet_segments(snippet)
-            assert "Starbucks" in result
-
-    def test_force_promo_filters_no_keyword_snippet(self):
-        """Snippet with year-less dates → always filtered (stale event signal)."""
-        with _patch_now():
-            snippet = "from 9 to 14 July with a wide selection of children's books"
-            # Year-less dates are now always filtered regardless of force_promo
-            assert _filter_snippet_segments(snippet) == ""
-            assert _filter_snippet_segments(snippet, force_promo=True) == ""
-
-    def test_force_promo_keeps_snippet_with_future_date(self):
-        """Snippet with full future date kept even with force_promo."""
-        with _patch_now():
-            snippet = "Mofusand retail pop-up now till 30 June 2026"
-            assert _filter_snippet_segments(snippet, force_promo=True) == snippet
+            assert _is_expired_content("From 2025 to 31 August 2026") is False

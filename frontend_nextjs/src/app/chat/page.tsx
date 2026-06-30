@@ -191,6 +191,20 @@ export default function ChatPage() {
   const playSegment = useCallback((seg: AudioSegment) => {
     const { audioBase64, mimeType, visemes, gesture: segGesture, text } = seg;
 
+    // Skip empty audio (content policy rejection) — dequeue next immediately
+    if (!audioBase64) {
+      const next = audioQueueRef.current.shift();
+      if (next) {
+        playSegmentRef.current?.(next);
+      } else {
+        isPlayingRef.current = false;
+        setGesture("idle");
+        setCaptionText("");
+        chatSpeechEndCallbackRef.current?.();
+      }
+      return;
+    }
+
     setGesture(segGesture);
     setCaptionText(text);
     isPlayingRef.current = true;
