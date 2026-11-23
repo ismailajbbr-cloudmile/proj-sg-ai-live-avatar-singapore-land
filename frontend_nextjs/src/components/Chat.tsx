@@ -13,6 +13,7 @@ interface Message {
   sender: "user" | "bot";
   timestamp: Date;
   showQr?: boolean;
+  media?: { kind: "image" | "video"; url: string }[];
 }
 
 type TtsSegment = { audioBase64: string; mimeType: string; visemes: VisemeFrame[]; gesture: AvatarGesture; text: string };
@@ -55,6 +56,9 @@ function getAvailableLanguages(language?: string | string[]): string[] {
 }
 
 const GESTURE_PREFIX_RE = /^(idle|nod|shake|tilt|lookup|excited)(\s+|$)/i;
+
+const JOB_POLL_INTERVAL_MS = 3000;
+const JOB_POLL_TIMEOUT_MS = 10 * 60 * 1000;
 
 /** Strip a leading gesture token if the model leaked it into visible text. */
 function stripLeadingGesture(text: string): string {
@@ -207,6 +211,53 @@ export default function Chat({
     onThinkingChange?.(isThinking);
   }, [isThinking, onThinkingChange]);
 
+  // ── Background jobs (web search, image, video) ────────────────────────────
+  // The bot replies first; when a job finishes we send a hidden follow-up so it announces the result.
+  const [runningJobs, setRunningJobs] = useState<{ id: string; operation: string }[]>([]);
+  const readyJobsRef = useRef<string[]>([]);
+  const isThinkingRef = useRef(false);
+  const unmountedRef = useRef(false);
+  const handleSendRef = useRef<((text?: string, jobId?: string) => Promise<void>) | null>(null);
+
+  useEffect(() => () => { unmountedRef.current = true; }, []);
+
+  const flushReadyJobs = useCallback(() => {
+    if (unmountedRef.current || isThinkingRef.current) return;
+    const next = readyJobsRef.current.shift();
+    if (next) handleSendRef.current?.(undefined, next);
+  }, []);
+
+  useEffect(() => {
+    isThinkingRef.current = isThinking;
+    if (!isThinking) flushReadyJobs();
+  }, [isThinking, flushReadyJobs]);
+
+  const pollJob = useCallback((jobId: string, operation: string) => {
+    setRunningJobs((prev) => [...prev, { id: jobId, operation }]);
+    const startedAt = Date.now();
+    const tick = async () => {
+      if (unmountedRef.current) return;
+      let status = "running";
+      try {
+        const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+        if (res.ok) status = (await res.json()).status ?? "running";
+        else if (res.status === 404 || res.status === 401) status = "gone";
+      } catch {
+        // Network blip — retry on the next tick
+      }
+      if (status === "running" && Date.now() - startedAt < JOB_POLL_TIMEOUT_MS) {
+        setTimeout(tick, JOB_POLL_INTERVAL_MS);
+        return;
+      }
+      setRunningJobs((prev) => prev.filter((job) => job.id !== jobId));
+      if (status === "done" || status === "failed") {
+        readyJobsRef.current.push(jobId);
+        flushReadyJobs();
+      }
+    };
+    setTimeout(tick, JOB_POLL_INTERVAL_MS);
+  }, [flushReadyJobs]);
+
   // ── Speech-ended callback — registered with parent so it can notify us ───
   // No dependency array: always captures the latest handleSend without stale closure.
   useEffect(() => {
@@ -273,12 +324,20 @@ export default function Chat({
   }, [fetchTtsSegment, drainTtsQueue]);
 
   // ── Chat logic ────────────────────────────────────────────────────────────
-  const handleSend = async (textToSend?: string) => {
-    const text = textToSend || input;
-    if (!text.trim() || isThinking) return;
+  /** jobId set = hidden follow-up announcing a finished background job (no user bubble, no speech reset). */
+  const handleSend = async (textToSend?: string, jobId?: string) => {
+    const text = jobId ? "" : (textToSend || input);
+    if (jobId) {
+      if (isThinkingRef.current) {
+        readyJobsRef.current.unshift(jobId);
+        return;
+      }
+    } else if (!text.trim() || isThinking) {
+      return;
+    }
 
     // Voice/PTT input interrupts current speech; typed input while speaking is queued
-    if (isAvatarSpeakingRef.current) {
+    if (!jobId && isAvatarSpeakingRef.current) {
       if (textToSend) {
         onClearSpeech?.();
         pendingTtsRef.current = [];
@@ -296,19 +355,26 @@ export default function Chat({
       }
     }
 
-    const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
-    setMessages((prev) => [...prev, newUserMessage]);
-    if (!textToSend) setInput("");
+    if (!jobId) {
+      const newUserMessage: Message = { id: messageIdRef.current++, text, sender: "user", timestamp: new Date() };
+      setMessages((prev) => [...prev, newUserMessage]);
+      if (!textToSend) setInput("");
 
-    onClearSpeech?.();
-    pendingTtsRef.current = [];
-    ttsDrainRunningRef.current = false;
-    ttsActiveFetchesRef.current = 0;
-    setIsTtsBusy(false);
+      onClearSpeech?.();
+      pendingTtsRef.current = [];
+      ttsDrainRunningRef.current = false;
+      ttsActiveFetchesRef.current = 0;
+      setIsTtsBusy(false);
+    }
+    isThinkingRef.current = true;
     setIsThinking(true);
     isAvatarSpeakingRef.current = true;
 
-    const history = messages.map(msg => ({ role: msg.sender, text: msg.text }));
+    // Media URLs travel with history so the server can edit the latest picture later.
+    const history = messages.map(msg => ({
+      role: msg.sender,
+      text: [msg.text, ...(msg.media ?? []).map(m => `[${m.kind}] ${m.url}`)].filter(Boolean).join("\n"),
+    }));
 
     try {
       const res = await fetch("/api/chat", {
@@ -319,6 +385,7 @@ export default function Chat({
           history,
           conversation_id: conversationIdRef.current,
           language: currentLanguage,
+          job_id: jobId ?? null,
         }),
       });
 
@@ -327,6 +394,11 @@ export default function Chat({
           sessionStorage.removeItem(KIOSK_CHAT_ENTRY_KEY);
           setIsThinking(false);
           router.replace("/");
+          return;
+        }
+        if (jobId) {
+          // Job expired or was already announced — nothing to show.
+          setIsThinking(false);
           return;
         }
         const errData = await res.json().catch(() => ({}));
@@ -405,6 +477,18 @@ export default function Chat({
                 );
                 enqueueTts(localeStrings.chat.qrTts, gesture);
               }
+            } else if (parsed.type === "media" && parsed.url) {
+              const mediaItem = { kind: parsed.kind === "video" ? "video" as const : "image" as const, url: String(parsed.url) };
+              setMessages((prev) => {
+                const existing = prev.find((m) => m.id === botMessageId);
+                if (!existing) {
+                  return [...prev, { id: botMessageId, text: fullText, sender: "bot", timestamp: new Date(), media: [mediaItem] }];
+                }
+                return prev.map((m) => m.id === botMessageId ? { ...m, media: [...(m.media ?? []), mediaItem] } : m);
+              });
+              messageAdded = true;
+            } else if (parsed.type === "job" && parsed.id) {
+              pollJob(String(parsed.id), String(parsed.operation ?? ""));
             } else if (parsed.type === "show_qr") {
               setMessages((prev) =>
                 prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
@@ -428,6 +512,7 @@ export default function Chat({
       }]);
     }
   };
+  handleSendRef.current = handleSend;
 
   // ── Speech recognition ────────────────────────────────────────────────────
   useEffect(() => {
@@ -549,7 +634,7 @@ export default function Chat({
                   <div className="flex-1 min-w-0">
                     <div
                       className="rounded-2xl rounded-tl-sm px-4 py-3 text-[15px] shadow-sm prose prose-sm max-w-none text-[#1e293b]"
-                      style={{ background: "white", border: "1px solid #f1f5f9", lineHeight: 1.5, display: "inline-block" }}
+                      style={{ background: "white", border: "1px solid #f1f5f9", lineHeight: 1.5, display: "inline-block", maxWidth: "100%", overflowWrap: "anywhere" }}
                     >
                       <ReactMarkdown components={botMarkdownComponents}>
                         {message.text.replace(/\[SHOW_QR\]/g, "").trim()}
@@ -558,6 +643,13 @@ export default function Chat({
                     <p className="mt-1.5 ml-1 text-[11px] font-medium text-gray-400" suppressHydrationWarning>
                       {formatTime(message.timestamp)}
                     </p>
+                    {message.media?.map((item) => (
+                      item.kind === "video" ? (
+                        <video key={item.url} src={item.url} controls className="mt-3 ml-1 max-w-full rounded-lg" />
+                      ) : (
+                        <img key={item.url} src={item.url} alt="" className="mt-3 ml-1 max-w-full rounded-lg" />
+                      )
+                    ))}
                     {message.showQr && (
                       <div className="mt-3 ml-1">
                         <p className="text-[11px] text-gray-500 mb-1.5">{localeStrings.chat.qrCaption}</p>
@@ -574,7 +666,7 @@ export default function Chat({
                 <div className="flex flex-col items-end w-full pl-8">
                   <div
                     className="rounded-2xl rounded-tr-sm px-4 py-3 text-[15px] shadow-sm ml-auto whitespace-pre-wrap"
-                    style={{ background: "#0a2240", color: "white", lineHeight: 1.5, display: "inline-block" }}
+                    style={{ background: "#0a2240", color: "white", lineHeight: 1.5, display: "inline-block", maxWidth: "100%", overflowWrap: "anywhere" }}
                   >
                     {message.text}
                   </div>
@@ -583,6 +675,12 @@ export default function Chat({
                   </p>
                 </div>
               )}
+            </div>
+          ))}
+          {runningJobs.map((job) => (
+            <div key={job.id} className="flex items-center gap-2 ml-9 text-[12px] text-gray-500">
+              <span className="w-2 h-2 rounded-full bg-[#0a2240] animate-pulse" />
+              {localeStrings.chat.working(job.operation)}
             </div>
           ))}
           {isThinking && (

@@ -15,8 +15,8 @@ const geistMono = Geist_Mono({
 // Sets default <title> and <meta name="description"> for all pages
 // Can be overridden per page
 export const metadata: Metadata = {
-  title: "AI Concierge | Marina Square",
-  description: "Singapore Land Group AI Concierge — your virtual assistant for Marina Square",
+  title: "AI Concierge | CloudMile",
+  description: "CloudMile AI Concierge — your virtual assistant",
 };
 
 // Required root component in the App Router

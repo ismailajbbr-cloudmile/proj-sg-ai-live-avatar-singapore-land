@@ -14,7 +14,7 @@ import Avatar from "@/components/Avatar";
 
 // Page Name: Lobby
 // Route: /
-// Description: Pre-call lobby screen — Marina Square theme
+// Description: Pre-call lobby screen — CloudMile theme
 
 function RotatingPrompt({ prompts }: { prompts: string[] }) {
   const [index, setIndex] = useState(0);
@@ -119,7 +119,7 @@ export default function LobbyPage() {
 
       {/* Top Navigation Bar */}
       <div className="absolute top-0 left-0 right-0 h-20 bg-white shadow-sm flex items-center justify-between px-8 z-10 w-full">
-        <img src="/logo-marinasquare.png" alt="Marina Square" className="h-12 object-contain" />
+        <img src="/logo-cloudmile.jpg" alt="CloudMile" className="h-12 object-contain" />
         <div className="flex items-center gap-4">
           {isAdmin && (
             <Link

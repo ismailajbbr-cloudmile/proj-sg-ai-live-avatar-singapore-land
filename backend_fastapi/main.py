@@ -5,7 +5,16 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from config import settings
-from routers import auth, chat, conversations, tts, users, config_router, analytics
+from routers import (
+    analytics,
+    auth,
+    chat,
+    config_router,
+    conversations,
+    jobs,
+    tts,
+    users,
+)
 
 # Configure app-level logging so services.vertex_search / services.gemini logs are visible
 logging.basicConfig(
@@ -34,6 +43,7 @@ app.include_router(auth.router, prefix="/auth", tags=["auth"])
 app.include_router(users.router, prefix="/users", tags=["users"])
 app.include_router(conversations.router, prefix="/conversations", tags=["conversations"])
 app.include_router(chat.router, tags=["chat"])
+app.include_router(jobs.router, tags=["jobs"])
 app.include_router(tts.router, tags=["tts"])
 app.include_router(config_router.router, tags=["config"])
 app.include_router(analytics.router, prefix="/analytics", tags=["analytics"])

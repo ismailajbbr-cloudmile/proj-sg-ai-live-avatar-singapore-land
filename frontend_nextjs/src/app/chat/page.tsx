@@ -15,7 +15,7 @@ import { DEFAULT_LOCALE, getLocaleStrings, readStoredLocale } from "@/lib/locale
 // Route: /chat
 // Description: Marina Square AI Concierge Interface (Push Animation Layout)
 
-const AVATAR_NAME = "Marina Square AI Concierge";
+const AVATAR_NAME = "CloudMile AI Concierge";
 
 function CallTimer() {
   const [seconds, setSeconds] = useState(0);
@@ -388,7 +388,7 @@ export default function ChatPage() {
         {/* ── Top Header Bar ── */}
         <div className="absolute left-6 right-6 top-6 z-20 flex items-center justify-between">
           <div className="flex items-center gap-3 bg-white/90 backdrop-blur-md pl-4 pr-5 py-2.5 rounded-full shadow-md border border-white/50">
-            <img src="/logo-marinasquare.png" alt="Marina Square" className="h-8 object-contain" />
+            <img src="/logo-cloudmile.jpg" alt="CloudMile" className="h-8 object-contain" />
             <div className="w-px h-5 bg-gray-200 ml-1"></div>
             <span className="text-sm font-semibold text-[#64748b]">AI Concierge</span>
           </div>
@@ -511,7 +511,7 @@ export default function ChatPage() {
             language={lang}
             localeReady={localeReady}
             onClose={() => setIsChatOpen(false)}
-            avatarName="Marina Square AI Concierge"
+            avatarName={AVATAR_NAME}
             isPttHoveredOrPressed={isPttPressed}
             onRecordingStatusChange={(recording) => setIsRecording(recording)}
             onThinkingChange={setIsAiThinking}

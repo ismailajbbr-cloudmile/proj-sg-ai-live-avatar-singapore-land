@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 SYSTEM_INSTRUCTION = """
 You are the Marina Square AI Concierge, a helpful, professional, and knowledgeable digital assistant for Marina Square shopping mall in Singapore.
 Your goal is to assist visitors, answer questions about stores, dining, events, promotions, facilities, parking, and provide general guidance about Marina Square.
-Be polite, concise, and helpful. Do not mention that you are an AI model created by Google.
+Be polite, concise, and helpful. Do not name the company or model that generates your answers.
 
 Please act as a bilingual assistant supporting English and Chinese.
 Dynamically switch between the two languages based on my input.
@@ -82,6 +82,42 @@ Formatting for chat display (use markdown in your spoken response text):
 - Put a blank line between sections (intro, deal list, membership info).
 - Do NOT use # headings or code blocks."""
 
+GENERAL_SYSTEM_INSTRUCTION = """
+You are a helpful, professional AI concierge in a live demo.
+Answer greetings and general questions from your own knowledge. Be polite, concise, and conversational.
+Do not name the company or model that generates your answers.
+Do not claim to have a private directory, a venue map, or website search results.
+If you are unsure, say so plainly. Do not invent specific store names, prices, or opening hours for a venue you were not given.
+
+Please act as a bilingual assistant supporting English and Chinese.
+Dynamically switch between the two languages based on my input.
+Whenever you generate Chinese content, ensure it is always written in Simplified Chinese characters.
+
+IMPORTANT: Always respond in exactly this format — no JSON, no code blocks:
+Line 1: <gesture> (exactly one word from: idle | nod | shake | tilt | lookup | excited)
+Line 2+: <your spoken response>
+
+Example:
+idle
+Hello. How can I help you today?
+
+Gesture rules — be very selective, most responses should use "idle":
+- idle: DEFAULT for informational answers, multi-sentence replies, and professional greetings / welcomes
+- nod: Short confirmations ("Yes.", "That's correct.") or a brief friendly acknowledgment
+- shake: ONLY when explicitly saying no or correcting a misconception
+- tilt: ONLY when genuinely uncertain or asking a clarifying question
+- lookup: ONLY when recalling a specific fact or statistic
+- excited: ONLY for rare, clearly high-energy moments. Do NOT use for normal hellos or routine welcomes.
+
+When in doubt, use "idle".
+Do NOT append "[SHOW_QR]".
+
+Formatting for chat display (use markdown in your spoken response text):
+- Use **bold** for names and key facts.
+- When listing 3 or more items, use a markdown bullet list (- item).
+- Put a blank line between sections.
+- Do NOT use # headings or code blocks."""
+
 _SMALL_TALK_PATTERN = re.compile(
     r"^\s*(?:"
     r"hi|hello|hey|yo|"
@@ -91,7 +127,9 @@ _SMALL_TALK_PATTERN = re.compile(
     r"how\s+are\s+you|what(?:'s|\s+is)\s+up|"
     r"你好|您好|谢谢|多谢|再见|再会|"
     r"早上好|下午好|晚上好|午安|"
-    r"你好吗|怎么样"
+    r"你好吗|怎么样|"
+    r"halo|hai|selamat\s+(?:pagi|siang|sore|malam)|"
+    r"terima\s+kasih|apa\s+kabar"
     r")\s*[!.?，。！？]*\s*$",
     re.IGNORECASE,
 )
@@ -108,18 +146,27 @@ def _grounding_rules() -> str:
 - You MAY respond without context only for greetings, thanks, goodbye, and brief clarifying questions — not for mall facts."""
 
 
-def _session_language_instruction(language: str) -> str:
+def _session_language_instruction(language: str, *, grounded: bool = True) -> str:
     if language.startswith("zh"):
-        return (
+        instruction = (
             "Respond in Simplified Chinese (简体中文) for this entire session "
-            "unless the user explicitly asks to switch to English.\n"
-            "OUTSIDE store rule (Chinese): If the user asks about 外面、OUTSIDE、或 OUTSIDE店 "
-            "in a directions or location question, they mean the tenant store OUTSIDE inside "
-            "Marina Square — not leaving the mall. Give in-mall directions and append [SHOW_QR]."
+            "unless the user explicitly asks to switch to English."
+        )
+        if grounded:
+            instruction += (
+                "\nOUTSIDE store rule (Chinese): If the user asks about 外面、OUTSIDE、或 OUTSIDE店 "
+                "in a directions or location question, they mean the tenant store OUTSIDE inside "
+                "Marina Square — not leaving the mall. Give in-mall directions and append [SHOW_QR]."
+            )
+        return instruction
+    if language.startswith("id"):
+        return (
+            "Respond in Bahasa Indonesia for this entire session "
+            "unless the user explicitly asks to switch to English or Chinese."
         )
     return (
         "Respond in English for this entire session "
-        "unless the user explicitly asks to switch to Chinese."
+        "unless the user explicitly asks to switch to Chinese or Bahasa Indonesia."
     )
 
 
@@ -146,7 +193,14 @@ def _promo_event_rules() -> str:
 def _build_system_instruction(
     language: str = "en-US",
     search_context: str = "",
+    *,
+    grounded: bool = True,
 ) -> str:
+    if not grounded:
+        return (
+            f"{GENERAL_SYSTEM_INSTRUCTION.strip()}\n\n"
+            f"{_session_language_instruction(language, grounded=False)}"
+        )
     base = (
         f"{SYSTEM_INSTRUCTION.strip()}\n\n"
         f"{_grounding_rules()}\n\n"
@@ -163,6 +217,13 @@ def _is_small_talk(message: str) -> bool:
 
 
 def _fallback_response(language: str) -> str:
+    if language.startswith("id"):
+        return (
+            "tilt\n"
+            "Maaf, informasi itu belum ada di direktori saya. "
+            "Anda dapat mengunjungi marinasquare.com.sg, "
+            "atau bertanya di konter informasi Lantai 2."
+        )
     if language.startswith("zh"):
         return (
             "tilt\n"
@@ -216,10 +277,14 @@ def _build_generate_config(
     model: str,
     language: str = "en-US",
     search_context: str = "",
+    *,
+    grounded: bool = True,
 ) -> types.GenerateContentConfig:
     kwargs: dict = {
-        "system_instruction": _build_system_instruction(language, search_context),
-        "temperature": 0.0,
+        "system_instruction": _build_system_instruction(
+            language, search_context, grounded=grounded
+        ),
+        "temperature": 0.0 if grounded else 0.4,
         "top_p": 0.95,
     }
     if _is_gemini_3_family(model):
@@ -281,15 +346,20 @@ async def stream_gemini_response(
     language: str = "en-US",
 ) -> AsyncIterator[str]:
     model = settings.gemini_chat_model
+    # Grounding is optional. Off = general demo chat, no directory fallback.
+    # On with empty datastore IDs still refuses, so a kiosk deploy cannot answer ungrounded.
+    grounding = settings.require_datastore_grounding
 
-    if not _has_datastore_config():
+    if grounding and not _has_datastore_config():
         logger.warning(
             "[Gemini] No Vertex AI Search datastore IDs configured — "
-            "VERTEX_AI_WEB_DATASTORE_ID and VERTEX_AI_PDF_DATASTORE_ID are empty"
+            "VERTEX_AI_WEB_ENGINE_ID and VERTEX_AI_WEB_DATASTORE_ID are empty"
         )
-        if settings.require_datastore_grounding:
-            yield _fallback_response(language)
-            return
+        yield _fallback_response(language)
+        return
+
+    if not grounding:
+        logger.info("[Gemini] datastore grounding disabled — general demo mode")
 
     client = _get_client()
     contents = [
@@ -299,18 +369,21 @@ async def stream_gemini_response(
 
     is_small_talk = _is_small_talk(message)
 
-    if is_small_talk:
-        # ── Small talk: no search needed ──
-        logger.info("[Gemini] small_talk detected, skipping search")
-        config = _build_generate_config(model, language)
+    if is_small_talk or not grounding:
+        logger.info(
+            "[Gemini] %s, skipping search",
+            "small_talk" if is_small_talk else "general_demo",
+        )
+        config = _build_generate_config(model, language, grounded=grounding)
         final_text, _, elapsed = await _call_gemini(client, model, contents, config)
+        mode = "small_talk" if is_small_talk else "general"
 
     else:
         # ── All factual queries: use direct search (deterministic) ──
         logger.info("[Gemini] factual_query detected, using direct search")
         search_response: SearchResponse = await search_datastores(message)
 
-        if settings.require_datastore_grounding and not search_response.results:
+        if not search_response.results:
             logger.warning("[Gemini] search returned no results for %r — using fallback", message)
             yield _fallback_response(language)
             return
@@ -318,16 +391,17 @@ async def stream_gemini_response(
         search_context = format_search_context(search_response)
         config = _build_generate_config(model, language, search_context=search_context)
         final_text, _, elapsed = await _call_gemini(client, model, contents, config)
+        mode = "direct_search"
 
     logger.info(
         "[Gemini] model=%s stream_complete elapsed_s=%.3f mode=%s",
-        model, elapsed, "small_talk" if is_small_talk else "direct_search",
+        model, elapsed, mode,
     )
 
     # ── Validate response ──
     if not final_text.strip():
         logger.warning("[Gemini] model=%s no_text_yielded elapsed_s=%.3f", model, elapsed)
-        if settings.require_datastore_grounding and not is_small_talk:
+        if grounding and not is_small_talk:
             final_text = _fallback_response(language)
 
     if final_text:

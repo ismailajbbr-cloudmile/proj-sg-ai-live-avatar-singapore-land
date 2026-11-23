@@ -5,7 +5,7 @@ from google.api_core.exceptions import InvalidArgument
 from pydantic import BaseModel
 
 from auth.dependencies import get_current_user
-from services.tts_service import synthesize
+from services.chat_provider import synthesize_speech
 
 logger = logging.getLogger(__name__)
 
@@ -24,7 +24,7 @@ async def tts(body: TtsRequest, _: dict = Depends(get_current_user)):
     if not body.text.strip():
         raise HTTPException(status_code=400, detail="text is required")
     try:
-        result = await synthesize(body.text, body.language)
+        result = await synthesize_speech(body.text, body.language)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

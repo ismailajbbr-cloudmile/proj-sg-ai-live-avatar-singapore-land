@@ -119,8 +119,8 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
                     </button>
                     <Link href="/admin/users" className="flex min-w-0 items-center gap-3">
                         <img
-                            src="/logo-marinasquare.png"
-                            alt="Marina Square"
+                            src="/logo-cloudmile.jpg"
+                            alt="CloudMile"
                             className="h-9 w-auto object-contain md:h-12"
                         />
                         <div className="hidden min-w-0 sm:block">

@@ -1,7 +1,7 @@
 import json
 import secrets
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import bcrypt
 from fastapi import APIRouter, Depends, HTTPException
@@ -14,8 +14,9 @@ from auth.dependencies import get_current_user
 from models.conversation import Conversation
 from models.message import Message, MessageRole
 from models.user import User
+from services.background_jobs import followup_message, get_job, start_job
+from services.chat_provider import stream_chat_response
 from services.db import async_session
-from services.gemini import stream_gemini_response
 
 router = APIRouter()
 
@@ -79,6 +80,8 @@ class ChatRequest(BaseModel):
     history: list[dict] = []
     conversation_id: uuid.UUID | None = None
     language: str = "en-US"
+    # Set when announcing a finished background job; message is then ignored.
+    job_id: str | None = None
 
 
 @router.post("/chat")
@@ -90,7 +93,17 @@ async def chat(
     user_id: uuid.UUID | None = current_user["id"]
     is_admin: bool = current_user["is_admin"]
     kiosk_username: str = current_user["username"]
-    message: str = body.message
+    job = None
+    if body.job_id:
+        job = get_job(body.job_id, kiosk_username)
+        if job is None:
+            raise HTTPException(status_code=404, detail="Job not found")
+        if job.status == "running":
+            raise HTTPException(status_code=409, detail="Job is still running")
+        if job.announced:
+            raise HTTPException(status_code=409, detail="Job result was already announced")
+        job.announced = True
+    message: str = followup_message(job) if job else body.message
     conversation_id: uuid.UUID | None = body.conversation_id
     history: list[dict] = body.history
     language: str = body.language
@@ -128,8 +141,8 @@ async def chat(
             # No DB conversation only if user resolution fully failed
             conv_id_str = str(conversation_id) if conversation_id else None
 
-            # ── 2. Save user message ────────────────────────────────────────
-            if conv is not None:
+            # ── 2. Save user message (job follow-ups are not visitor input) ──
+            if conv is not None and job is None:
                 user_msg = Message(
                     conversation_id=conv.id,
                     role=MessageRole.user,
@@ -149,7 +162,7 @@ async def chat(
                 )
                 all_msgs = list(msgs_result.scalars())
                 # Exclude the last message (the one we just inserted)
-                history_msgs = all_msgs[:-1]
+                history_msgs = all_msgs if job else all_msgs[:-1]
                 gemini_history = [
                     {"role": m.role.value, "parts": [{"text": m.content}]}
                     for m in history_msgs
@@ -168,6 +181,7 @@ async def chat(
 
             # ── 4. Stream Gemini ────────────────────────────────────────────
             collected_text = ""
+            media_lines: list[str] = []
             gesture_emitted = False
             line_buffer = ""
 
@@ -176,7 +190,28 @@ async def chat(
                 yield sse({"type": "conversation_id", "value": conv_id_str})
 
             try:
-                async for chunk_text in stream_gemini_response(message, gemini_history, language=language):
+                if job is not None and job.media is not None:
+                    media_lines.append(f"[{job.media.kind}] {job.media.url}")
+                    yield sse({"type": "media", "kind": job.media.kind, "url": job.media.url})
+
+                async for item in stream_chat_response(
+                    message, gemini_history, language=language, followup=job is not None
+                ):
+                    if isinstance(item, dict):
+                        if item.get("type") == "job_request":
+                            started = start_job(
+                                owner=kiosk_username,
+                                operation=str(item.get("operation", "")),
+                                arguments=item.get("arguments") or {},
+                                request=str(item.get("request") or message),
+                            )
+                            yield sse({"type": "job", "id": started.id, "operation": started.operation})
+                            continue
+                        if item.get("type") == "media" and item.get("url"):
+                            media_lines.append(f"[{item.get('kind', 'image')}] {item['url']}")
+                        yield sse(item)
+                        continue
+                    chunk_text = item
                     if not gesture_emitted:
                         line_buffer += chunk_text
                         newline_idx = line_buffer.find("\n")
@@ -210,14 +245,17 @@ async def chat(
 
             finally:
                 # ── 5. Save model response ──────────────────────────────────
-                if conv is not None and collected_text.strip():
+                saved = collected_text.strip()
+                if media_lines:
+                    saved = (saved + "\n" + "\n".join(media_lines)).strip()
+                if conv is not None and saved:
                     model_msg = Message(
                         conversation_id=conv.id,
                         role=MessageRole.model,
-                        content=collected_text.strip(),
+                        content=saved,
                     )
                     db.add(model_msg)
-                    conv.updated_at = datetime.now(timezone.utc).replace(tzinfo=None)
+                    conv.updated_at = datetime.now(UTC).replace(tzinfo=None)
                     await db.commit()
 
     return StreamingResponse(

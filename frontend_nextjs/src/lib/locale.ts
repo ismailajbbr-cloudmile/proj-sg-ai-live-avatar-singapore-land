@@ -36,6 +36,8 @@ export interface LocaleStrings {
     waiting: (n: number) => string;
     speaking: string;
     privacy: string;
+    /** Status line while a background job (web search, image, video) runs */
+    working: (operation: string) => string;
   };
   idle: {
     title: string;
@@ -62,7 +64,7 @@ const STRINGS: Record<Locale, LocaleStrings> = {
   "en-US": {
     lobby: {
       title: "Hi, I'm your AI Concierge",
-      subtitle: "Ask me anything about Marina Square",
+      subtitle: "Ask me anything about CloudMile",
       prompts: [
         "Where is the nearest restaurant?",
         "What events are happening this week?",
@@ -79,7 +81,7 @@ const STRINGS: Record<Locale, LocaleStrings> = {
     },
     chat: {
       welcome: (avatarName) =>
-        `Welcome to Marina Square. I'm your ${avatarName}. How can I assist you today?`,
+        `Welcome to CloudMile. I'm your ${avatarName}. How can I assist you today?`,
       qrTts: "You can scan this QR code for detailed directions and information.",
       qrCaption: "You can scan this QR for detailed information:",
       errorEmpty: "Sorry, I am having trouble responding right now.",
@@ -90,6 +92,13 @@ const STRINGS: Record<Locale, LocaleStrings> = {
       waiting: (n) => `${n} waiting`,
       speaking: "Speaking…",
       privacy: "Powered by CloudMile • Your privacy is protected",
+      working: (operation) =>
+        ({
+          web_search: "Searching the web…",
+          create_image: "Creating image…",
+          edit_image: "Editing image…",
+          create_video: "Creating video… this can take a minute or two",
+        } as Record<string, string>)[operation] ?? "Working on it…",
     },
     idle: {
       title: "Still there?",
@@ -115,7 +124,7 @@ const STRINGS: Record<Locale, LocaleStrings> = {
   "zh-CN": {
     lobby: {
       title: "您好，我是您的 AI 礼宾",
-      subtitle: "有关滨海广场的任何问题都可以问我",
+      subtitle: "有关 CloudMile 的任何问题都可以问我",
       prompts: [
         "最近的餐厅在哪里？",
         "本周有什么活动？",
@@ -132,7 +141,7 @@ const STRINGS: Record<Locale, LocaleStrings> = {
     },
     chat: {
       welcome: (avatarName) =>
-        `欢迎来到滨海广场。我是您的${avatarName}。今天有什么可以帮您的？`,
+        `欢迎来到 CloudMile。我是您的${avatarName}。今天有什么可以帮您的？`,
       qrTts: "您可以扫描此二维码，获取详细的路线和信息。",
       qrCaption: "扫描此二维码获取详细信息：",
       errorEmpty: "抱歉，我现在无法回复。",
@@ -143,6 +152,13 @@ const STRINGS: Record<Locale, LocaleStrings> = {
       waiting: (n) => `${n} 条等待中`,
       speaking: "正在说话…",
       privacy: "由 CloudMile 提供技术支持 • 您的隐私受到保护",
+      working: (operation) =>
+        ({
+          web_search: "正在搜索网络…",
+          create_image: "正在生成图片…",
+          edit_image: "正在编辑图片…",
+          create_video: "正在生成视频…可能需要一两分钟",
+        } as Record<string, string>)[operation] ?? "正在处理…",
     },
     idle: {
       title: "还在吗？",
