@@ -87,6 +87,10 @@ def _tool_call(name: str, arguments: dict) -> dict:
     return {"id": name, "function": {"name": name, "arguments": json.dumps(arguments)}}
 
 
+def _plan(reply: dict, latest_picture: str, user_text: str):
+    return asyncio.run(_plan_jobs(reply, latest_picture, user_text))
+
+
 def test_tool_calls_become_background_job_requests():
     reply = {
         "tool_calls": [
@@ -96,7 +100,7 @@ def test_tool_calls_become_background_job_requests():
             _tool_call("wan_t2i", {"prompt": "x"}),
         ]
     }
-    requests, outputs = _plan_jobs(reply, _PICTURE, "make it blue")
+    requests, outputs = _plan(reply, _PICTURE, "make it blue")
     assert [r["operation"] for r in requests] == ["web_search", "edit_image", "create_video"]
     assert requests[1]["arguments"]["image_url"] == _PICTURE
     assert requests[2]["arguments"]["image_url"] == ""
@@ -113,7 +117,7 @@ def test_video_from_the_latest_picture_keeps_the_instruction():
             )
         ]
     }
-    requests, _outputs = _plan_jobs(reply, _PICTURE, "turn that picture into a video")
+    requests, _outputs = _plan(reply, _PICTURE, "turn that picture into a video")
     assert requests[0]["arguments"]["prompt"] == "the robot waves"
     assert requests[0]["arguments"]["image_url"] == _PICTURE
     assert "from_latest_picture" not in requests[0]["arguments"]
@@ -151,9 +155,32 @@ def test_clear_media_requests_force_a_tool_call():
 
 def test_edit_without_a_picture_starts_no_job():
     reply = {"tool_calls": [_tool_call("edit_image", {"prompt": "make it blue", "image_url": ""})]}
-    requests, outputs = _plan_jobs(reply, "", "make it blue")
+    requests, outputs = _plan(reply, "", "make it blue")
     assert requests == []
     assert "No picture" in outputs[0]
+
+
+def test_browse_tool_calls_become_job_requests():
+    reply = {
+        "tool_calls": [
+            _tool_call(
+                "browse_web",
+                {
+                    "goal": "Find the mall opening hours",
+                    "title": "Opening hours",
+                    "description": "Check the official site",
+                },
+            ),
+            _tool_call("get_browse_screen", {}),
+            _tool_call("stop_browse", {}),
+        ]
+    }
+    requests, outputs = _plan(reply, "", "use the browser")
+    assert [r["operation"] for r in requests] == ["browse_web"]
+    assert requests[0]["arguments"]["title"] == "Opening hours"
+    # No browser session exists offline, so both inline tools answer without a job.
+    assert outputs[1].startswith("No browser session")
+    assert "running right now" in outputs[2]
 
 
 def test_history_hides_signed_urls_but_remembers_the_picture():
@@ -192,3 +219,113 @@ def test_knowledge_context_marks_web_source():
     context = format_knowledge_context(["Marina Square Level 1"])
     assert "[datastore: web]" in context
     assert "Marina Square Level 1" in context
+
+
+def test_footer_text_is_one_free_text_setting(monkeypatch):
+    from routers.config_router import get_config
+
+    monkeypatch.setattr(settings, "footer_text", "Powered by Qwen")
+    assert asyncio.run(get_config())["footer_text"] == "Powered by Qwen"
+    monkeypatch.setattr(settings, "footer_text", "Ask me about events at Marina Square")
+    assert asyncio.run(get_config())["footer_text"] == "Ask me about events at Marina Square"
+    monkeypatch.setattr(settings, "footer_text", "  ")
+    assert asyncio.run(get_config())["footer_text"] == ""
+
+
+def test_tool_name_before_the_gesture_is_dropped():
+    from routers.chat import _parse_leading_gesture
+
+    gesture, text = _parse_leading_gesture("browse_web idle\nI'll open Wikipedia for you.")
+    assert gesture == "idle"
+    assert text == "I'll open Wikipedia for you."
+    assert _parse_leading_gesture("idle\nHello") == ("idle", "Hello")
+    assert _parse_leading_gesture("Hello there") == ("idle", "Hello there")
+
+
+_DECLARED_TOOLS = [
+    {"type": "function", "function": {"name": "browse_web"}},
+    {"type": "function", "function": {"name": "create_image"}},
+]
+
+
+def test_text_tool_call_becomes_a_real_call_and_a_job():
+    from services.alibaba_chat import _recover_text_tool_call
+
+    reply = {
+        "role": "assistant",
+        "content": 'browse_web {"goal": "Open Wikipedia", "title": "Wikipedia"}',
+    }
+    recovered = _recover_text_tool_call(reply, _DECLARED_TOOLS)
+    calls = recovered["tool_calls"]
+    assert calls[0]["function"]["name"] == "browse_web"
+    assert json.loads(calls[0]["function"]["arguments"])["goal"] == "Open Wikipedia"
+
+    requests, _outputs = _plan(recovered, "", "buka wikipedia di browser")
+    assert [request["operation"] for request in requests] == ["browse_web"]
+
+
+def test_plain_text_and_unknown_tools_stay_text():
+    from services.alibaba_chat import _recover_text_tool_call
+
+    assert "tool_calls" not in _recover_text_tool_call(
+        {"content": "Sure, opening it now."}, _DECLARED_TOOLS
+    )
+    assert "tool_calls" not in _recover_text_tool_call(
+        {"content": 'delete_everything {"target": "prod"}'}, _DECLARED_TOOLS
+    )
+
+
+def test_leading_tool_name_detects_a_written_call():
+    from services.alibaba_chat import _leading_tool_name
+
+    assert _leading_tool_name("browse_web\nidle\nOpening Wikipedia now.", _DECLARED_TOOLS) == "browse_web"
+    assert _leading_tool_name("Open the site first.", _DECLARED_TOOLS) == ""
+    assert _leading_tool_name("browse_web please", None) == ""
+
+
+def test_written_browse_call_is_forced_and_becomes_a_job(monkeypatch):
+    from services.alibaba_chat import stream_qwen_response
+
+    replies = [
+        {"choices": [{"message": {"content": "browse_web\nidle\nOpening it now."}}]},
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            _tool_call(
+                                "browse_web",
+                                {"goal": "Open Wikipedia", "title": "Wikipedia"},
+                            )
+                        ],
+                    }
+                }
+            ]
+        },
+        {"choices": [{"message": {"content": "idle\nSedang membuka Wikipedia."}}]},
+    ]
+    calls: list[dict] = []
+
+    async def fake_complete(_messages, **kwargs):
+        calls.append(kwargs)
+        return replies[len(calls) - 1]
+
+    monkeypatch.setattr("services.alibaba_chat._complete", fake_complete)
+
+    text: list[str] = []
+    events: list[dict] = []
+
+    async def run():
+        async for item in stream_qwen_response(
+            "buka wikipedia di browser", [], language="id-ID", owner="diag"
+        ):
+            if isinstance(item, dict):
+                events.append(item)
+            else:
+                text.append(item)
+
+    asyncio.run(run())
+    assert "Sedang membuka Wikipedia" in "".join(text)
+    assert [event["operation"] for event in events] == ["browse_web"]
+    assert calls[1]["tool_choice"] == {"type": "function", "function": {"name": "browse_web"}}

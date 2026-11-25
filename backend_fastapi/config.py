@@ -50,6 +50,15 @@ class Settings(BaseSettings):
     dashscope_video_model: str = "wan3.0-video"
     dashscope_video_from_image_model: str = "wan3.0-video"
 
+    # Browser automation: Qwen-VL picks each click from a Playwright screenshot.
+    browse_enabled: bool = True
+    dashscope_browse_model: str = "qwen3-vl-plus"
+    browse_max_turns: int = 20
+
+    # Free text shown as a small pill above the privacy line, e.g. a tagline or a credit.
+    # Any wording works; empty hides the pill.
+    footer_text: str = ""
+
     tts_model: str = "gemini-2.5-flash-tts"
     tts_voice_name: str = "Achernar"
     tts_voice_prompt: str = """

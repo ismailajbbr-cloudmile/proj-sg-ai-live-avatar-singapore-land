@@ -1,8 +1,10 @@
 """Qwen chat through the OpenAI-compatible DashScope endpoint."""
 
+import asyncio
 import json
 import logging
 import re
+import uuid
 from collections.abc import AsyncIterator
 from datetime import datetime
 from zoneinfo import ZoneInfo
@@ -12,6 +14,8 @@ import httpx
 from config import settings
 from services.alibaba_client import auth_headers, chat_completions_url
 from services.alibaba_search import format_knowledge_context, retrieve_knowledge
+from services.background_jobs import latest_browse, stop_browse
+from services.browser_use import describe_screenshot
 from services.chat_tools import BACKGROUND_OPERATIONS, chat_tools
 from services.gemini import (
     _build_system_instruction,
@@ -49,7 +53,8 @@ _WEB_SEARCH_NOTE = (
 
 _BACKGROUND_NOTE = (
     "Your tools run in the background. After you call one, the result appears later in this chat. "
-    "Never pretend you already have the result."
+    "Never pretend you already have the result. Never write a tool name or its JSON in the reply; "
+    "use the tool call itself."
 )
 
 _PICTURE_NOTE = (
@@ -57,6 +62,17 @@ _PICTURE_NOTE = (
     "For edit_image, pass image_url as an empty string to edit that latest picture. "
     "For create_video, set from_latest_picture to true when the visitor wants a video of that picture. "
     "Keep replies short. Never write image or video URLs in your reply; the app shows the media."
+)
+
+_BROWSE_NOTE = (
+    "You can drive a real browser with browse_web. Use it only when the visitor clearly asks "
+    "to use the browser, browse or open a website, click through a site, or do something on a "
+    "page. For ordinary facts, weather, news, prices, or opening hours, use web_search instead. "
+    "Pass a clear goal, a short title, and a one-sentence description. The visitor watches the "
+    "automated page live, so say browsing has started and never describe page content until the "
+    "result arrives. Call continue_browse to do more on the same page, get_browse_screen when "
+    "they ask what is on screen, and stop_browse when they want it stopped. "
+    "Always invoke the tool; never announce browsing in plain text without calling it."
 )
 
 _FOLLOWUP_NOTE = (
@@ -70,6 +86,8 @@ _STARTED = {
     "create_image": "creating the image (about 15 seconds)",
     "edit_image": "editing the image (about 15 seconds)",
     "create_video": "creating the video (about one to two minutes)",
+    "browse_web": "opening the browser (usually 20 to 60 seconds)",
+    "continue_browse": "working in the browser (usually 20 to 60 seconds)",
 }
 
 _MEDIA_ACTION = re.compile(
@@ -189,14 +207,137 @@ def _ack_fallback(language: str) -> str:
     return "nod\nSure, I'm working on it and will share the result here shortly."
 
 
-def _plan_jobs(
+def _browse_screen_output(job, language: str) -> str:
+    """JSON for get_browse_screen: latest page state plus a vision description."""
+    payload = {
+        "browse_id": job.id,
+        "status": job.status,
+        "title": job.title,
+        "url": job.url,
+        "step": job.step,
+        "summary": job.text,
+        "has_screenshot": bool(job.preview_b64),
+    }
+    if job.status == "running":
+        payload["message"] = "Browse still running. Tell the visitor it is still working."
+        return json.dumps(payload, ensure_ascii=False)
+    if not job.screen_text and job.preview_b64:
+        try:
+            job.screen_text = describe_screenshot(job.preview_b64, language)
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Alibaba] screenshot description failed: %s", exc)
+    payload["screen_description"] = job.screen_text or "No screenshot description available."
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def _continue_browse_arguments(arguments: dict, owner: str) -> str:
+    """Fold the last browse page into the next goal. Returns an error text or an empty string."""
+    goal = str(arguments.get("goal") or "").strip()
+    if not goal:
+        return "continue_browse needs a goal. Ask the visitor what to do on the page."
+    previous = latest_browse(owner) if owner else None
+    if previous is None:
+        return ""
+    if previous.status == "running":
+        return (
+            "A browser job is still running. Wait for it to finish, or call stop_browse first."
+        )
+    arguments["goal"] = (
+        f"Continue in the browser at {previous.url or 'the current page'}. "
+        f"Original task: {previous.goal or previous.request}. "
+        f"Outcome so far: {previous.text or previous.description}. "
+        f"Now: {goal}"
+    )
+    arguments["start_url"] = previous.url or ""
+    return ""
+
+
+_TEXT_TOOL_CALL = re.compile(r"^\s*([a-zA-Z_][\w]*)\s*(\{.*\})\s*$", re.DOTALL)
+
+
+def _parse_text_tool_call(text: str, tools: list[dict] | None) -> tuple[str, dict] | None:
+    """Read a call Qwen wrote as text, e.g. `browse_web {"goal": "..."}`.
+
+    The OpenAI-compatible endpoint usually returns tool_calls, but Qwen falls back to
+    printing the call in the message body often enough to break the chat flow.
+    """
+    if not tools or not text.strip():
+        return None
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        cleaned = re.sub(r"^```[a-zA-Z]*\s*|\s*```$", "", cleaned).strip()
+    match = _TEXT_TOOL_CALL.match(cleaned)
+    if not match:
+        return None
+    name, raw = match.group(1), match.group(2)
+    known = {
+        str((tool.get("function") or {}).get("name") or "")
+        for tool in tools
+        if isinstance(tool, dict)
+    }
+    if name not in known:
+        return None
+    try:
+        arguments = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    if not isinstance(arguments, dict):
+        return None
+    return name, arguments
+
+
+_TOOL_NAME_LEAD = re.compile(r"^\s*([a-zA-Z_][\w]*)\b")
+
+
+def _leading_tool_name(text: str, tools: list[dict] | None) -> str:
+    """Tool name Qwen printed at the start of a reply instead of calling it."""
+    if not tools:
+        return ""
+    match = _TOOL_NAME_LEAD.match(text.lstrip())
+    if not match:
+        return ""
+    name = match.group(1)
+    known = {
+        str((tool.get("function") or {}).get("name") or "")
+        for tool in tools
+        if isinstance(tool, dict)
+    }
+    return name if name in known else ""
+
+
+def _recover_text_tool_call(message: dict, tools: list[dict] | None) -> dict:
+    """Promote a text-only tool call into a real tool_calls entry."""
+    if message.get("tool_calls"):
+        return message
+    parsed = _parse_text_tool_call(_message_text(message), tools)
+    if parsed is None:
+        return message
+    name, arguments = parsed
+    logger.info("[Alibaba] recovered a text tool call name=%s", name)
+    return {
+        **message,
+        "tool_calls": [
+            {
+                "id": f"call_{uuid.uuid4().hex[:12]}",
+                "type": "function",
+                "function": {"name": name, "arguments": json.dumps(arguments)},
+            }
+        ],
+    }
+
+
+async def _plan_jobs(
     message: dict,
     latest_picture: str,
     user_text: str,
+    *,
+    owner: str = "",
+    language: str = "en-US",
 ) -> tuple[list[dict], list[str]]:
     """Turn tool calls into background job requests.
 
     Returns job_request events plus one tool result per call for the model.
+    Browser read/stop tools are answered here, in the same turn.
     """
     requests: list[dict] = []
     outputs: list[str] = []
@@ -210,6 +351,26 @@ def _plan_jobs(
             arguments = {}
         if not isinstance(arguments, dict):
             arguments = {}
+
+        if name == "get_browse_screen":
+            job = latest_browse(owner) if owner else None
+            if job is None or not job.steps:
+                outputs.append("No browser session exists in this chat yet.")
+                continue
+            outputs.append(await asyncio.to_thread(_browse_screen_output, job, language))
+            continue
+
+        if name == "stop_browse":
+            job = latest_browse(owner) if owner else None
+            stopped = stop_browse(job.id, owner) if job else None
+            if stopped is None:
+                outputs.append("No browser session is running right now.")
+                continue
+            outputs.append(
+                f"Stopped the browser session \"{stopped.title or stopped.goal}\". "
+                "Tell the visitor in one short sentence."
+            )
+            continue
 
         if name not in BACKGROUND_OPERATIONS:
             outputs.append(f"Unknown tool {name}. Answer without it.")
@@ -239,6 +400,11 @@ def _plan_jobs(
             else:
                 image_url = ""
             arguments["image_url"] = image_url
+        elif name == "continue_browse":
+            problem = _continue_browse_arguments(arguments, owner)
+            if problem:
+                outputs.append(problem)
+                continue
 
         logger.info("[Alibaba] background job requested operation=%s", name)
         requests.append(
@@ -302,6 +468,7 @@ async def stream_qwen_response(
     language: str = "en-US",
     *,
     followup: bool = False,
+    owner: str = "",
 ) -> AsyncIterator[str | dict]:
     if not settings.dashscope_api_key.strip():
         raise RuntimeError("DASHSCOPE_API_KEY is empty. Add the Singapore Model Studio key to .env.")
@@ -314,6 +481,7 @@ async def stream_qwen_response(
 
     grounding = settings.require_datastore_grounding
     web_search = settings.alibaba_enable_web_search
+    browse = settings.browse_enabled
     small_talk = _is_small_talk(message)
     search_context = ""
 
@@ -331,7 +499,7 @@ async def stream_qwen_response(
         yield _fallback_response(language)
         return
 
-    tools = None if small_talk else chat_tools(web_search=web_search and not search_context)
+    tools = None if small_talk else chat_tools(web_search=web_search and not search_context, browse=browse)
     instruction = _build_system_instruction(
         language,
         search_context,
@@ -343,6 +511,8 @@ async def stream_qwen_response(
             notes.append(_WEB_SEARCH_NOTE)
         if latest_picture:
             notes.append(_PICTURE_NOTE)
+        if browse:
+            notes.append(_BROWSE_NOTE)
         instruction = "\n\n".join([instruction, *notes])
 
     messages = [
@@ -352,9 +522,31 @@ async def stream_qwen_response(
     ]
     temperature = 0.0 if search_context else 0.4
     tool_choice = "required" if tools and _wants_media(message) else None
-    reply = _reply_message(
-        await _complete(messages, temperature=temperature, tools=tools, tool_choice=tool_choice)
+    reply = _recover_text_tool_call(
+        _reply_message(
+            await _complete(messages, temperature=temperature, tools=tools, tool_choice=tool_choice)
+        ),
+        tools,
     )
+
+    if tools and not reply.get("tool_calls"):
+        # Qwen also answers with "browse_web" plus prose and no call at all. Ask again, pinned.
+        intended = _leading_tool_name(_message_text(reply), tools)
+        if intended:
+            logger.info("[Alibaba] forcing tool call name=%s", intended)
+            try:
+                forced = await _complete(
+                    messages,
+                    temperature=temperature,
+                    tools=tools,
+                    tool_choice={"type": "function", "function": {"name": intended}},
+                )
+            except Exception as exc:  # noqa: BLE001 - fall back to the text we already have
+                logger.warning("[Alibaba] forced tool call failed: %s", exc)
+            else:
+                forced_reply = _reply_message(forced)
+                if forced_reply.get("tool_calls"):
+                    reply = forced_reply
 
     if not reply.get("tool_calls"):
         text = _strip_media_urls(_message_text(reply))
@@ -362,12 +554,17 @@ async def stream_qwen_response(
             yield text
         return
 
-    job_requests, tool_outputs = _plan_jobs(reply, latest_picture, message)
+    job_requests, tool_outputs = await _plan_jobs(
+        reply, latest_picture, message, owner=owner, language=language
+    )
     messages.append(reply)
     for call, output in zip(reply["tool_calls"], tool_outputs, strict=False):
         messages.append({"role": "tool", "tool_call_id": call.get("id", ""), "content": output})
     ack = _reply_message(await _complete(messages, temperature=temperature))
-    text = _strip_media_urls(_message_text(ack))
-    yield text or _ack_fallback(language)
+    ack_text = _strip_media_urls(_message_text(ack))
+    if _parse_text_tool_call(ack_text, tools) is not None:
+        # The model repeated the call instead of acknowledging it.
+        ack_text = ""
+    yield ack_text or _ack_fallback(language)
     for request in job_requests:
         yield request

@@ -8,6 +8,13 @@ COPY pyproject.toml uv.lock ./
 
 RUN uv sync --frozen --no-dev
 
+# Headless Chromium for browse_web (Qwen-VL + Playwright browser automation).
+# libatomic1 is needed before the Playwright CLI itself can start on slim images.
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+RUN uv run playwright install --with-deps chromium
+
 COPY . .
 
 EXPOSE 8000

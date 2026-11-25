@@ -17,6 +17,20 @@ import { DEFAULT_LOCALE, getLocaleStrings, readStoredLocale } from "@/lib/locale
 
 const AVATAR_NAME = "CloudMile AI Concierge";
 
+// Chat panel starts at its original width; the left edge can be dragged wider.
+const CHAT_DEFAULT_WIDTH = 380;
+const CHAT_MIN_WIDTH = 380;
+const CHAT_MAX_WIDTH = 900;
+const AVATAR_MIN_WIDTH = 420;
+const CHAT_WIDTH_STORAGE_KEY = "kiosk:chatWidth";
+
+/** Keep the chat panel between its original width and a size that still leaves room for the avatar. */
+function clampChatWidth(width: number): number {
+  const viewportRoom = typeof window === "undefined" ? CHAT_MAX_WIDTH : window.innerWidth - AVATAR_MIN_WIDTH;
+  const upper = Math.max(CHAT_MIN_WIDTH, Math.min(CHAT_MAX_WIDTH, viewportRoom));
+  return Math.round(Math.min(Math.max(width, CHAT_MIN_WIDTH), upper));
+}
+
 function CallTimer() {
   const [seconds, setSeconds] = useState(0);
   useEffect(() => {
@@ -73,12 +87,16 @@ function ToolbarBtn({ active, danger, children, onClick, label, dropdown }: Tool
 export default function ChatPage() {
   const router = useRouter();
   const [isChatOpen, setIsChatOpen] = useState(true);
+  const [chatWidth, setChatWidth] = useState(CHAT_DEFAULT_WIDTH);
+  const [isResizingChat, setIsResizingChat] = useState(false);
+  const chatDragRef = useRef<{ startX: number; startWidth: number } | null>(null);
   const [isAiThinking, setIsAiThinking] = useState(false);
   const [isPttPressed, setIsPttPressed] = useState(false);
   const [isRecording, setIsRecording] = useState(false);
   const [lang, setLang] = useState(DEFAULT_LOCALE);
   const [localeReady, setLocaleReady] = useState(false);
   const [idleTimeout, setIdleTimeout] = useState<number | null>(null);
+  const [footerText, setFooterText] = useState("");
   const [idleWarningOpen, setIdleWarningOpen] = useState(false);
   const [warningCountdown, setWarningCountdown] = useState(30);
 
@@ -105,13 +123,16 @@ export default function ChatPage() {
   // Callback ref: Chat.tsx writes a handler here; we call it when speech fully ends
   const chatSpeechEndCallbackRef = useRef<(() => void) | null>(null);
 
-  // Fetch config for idle timeout
+  // Fetch config for idle timeout and the optional footer text pill
   useEffect(() => {
     fetch("/api/config")
       .then((r) => r.json())
       .then((d) => {
         if (typeof d.session_idle_timeout_minutes === "number") {
           setIdleTimeout(d.session_idle_timeout_minutes);
+        }
+        if (typeof d.footer_text === "string") {
+          setFooterText(d.footer_text);
         }
       })
       .catch(() => {});
@@ -169,6 +190,59 @@ export default function ChatPage() {
   }, []);
 
   const localeStrings = getLocaleStrings(lang);
+
+  // ── Chat panel resize ──────────────────────────────────────────────────────
+  useEffect(() => {
+    const stored = Number(localStorage.getItem(CHAT_WIDTH_STORAGE_KEY));
+    if (Number.isFinite(stored) && stored > 0) setChatWidth(clampChatWidth(stored));
+  }, []);
+
+  useEffect(() => {
+    if (isResizingChat) return;
+    const onResize = () => setChatWidth((w) => clampChatWidth(w));
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, [isResizingChat]);
+
+  useEffect(() => {
+    if (!isResizingChat) return;
+    const previousUserSelect = document.body.style.userSelect;
+    const previousCursor = document.body.style.cursor;
+    document.body.style.userSelect = "none";
+    document.body.style.cursor = "col-resize";
+    return () => {
+      document.body.style.userSelect = previousUserSelect;
+      document.body.style.cursor = previousCursor;
+    };
+  }, [isResizingChat]);
+
+  useEffect(() => {
+    localStorage.setItem(CHAT_WIDTH_STORAGE_KEY, String(chatWidth));
+  }, [chatWidth]);
+
+  const startChatResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!isChatOpen) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    chatDragRef.current = { startX: event.clientX, startWidth: chatWidth };
+    setIsResizingChat(true);
+  };
+
+  const moveChatResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    const drag = chatDragRef.current;
+    if (!drag) return;
+    // Dragging left widens the panel.
+    setChatWidth(clampChatWidth(drag.startWidth + (drag.startX - event.clientX)));
+  };
+
+  const endChatResize = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (!chatDragRef.current) return;
+    chatDragRef.current = null;
+    setIsResizingChat(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
 
   // ── RAF ticker ─────────────────────────────────────────────────────────────
   const stopRaf = useCallback(() => {
@@ -497,19 +571,45 @@ export default function ChatPage() {
 
       {/* ── Right Side: Chat Panel Container (Push Animated) ── */}
       <div
-        className="h-full bg-white transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)] shadow-2xl z-30 overflow-hidden"
+        className={`relative h-full bg-white shadow-2xl z-30 overflow-hidden ${isResizingChat ? "" : "transition-all duration-[400ms] ease-[cubic-bezier(0.25,0.1,0.25,1)]"}`}
         style={{
-          width: isChatOpen ? 380 : 0,
-          minWidth: isChatOpen ? 380 : 0,
+          width: isChatOpen ? chatWidth : 0,
+          minWidth: isChatOpen ? chatWidth : 0,
           borderLeft: isChatOpen ? "1px solid #e2e8f0" : "none",
         }}
       >
-        <div style={{ width: 380, height: "100%", opacity: isChatOpen ? 1 : 0, transition: "opacity 300ms 100ms" }}>
+        {/* Drag the left edge to widen the panel; double-click restores the default width. */}
+        {isChatOpen && (
+          <div
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize chat panel"
+            aria-valuenow={chatWidth}
+            aria-valuemin={CHAT_MIN_WIDTH}
+            aria-valuemax={CHAT_MAX_WIDTH}
+            title="Drag to resize"
+            onPointerDown={startChatResize}
+            onPointerMove={moveChatResize}
+            onPointerUp={endChatResize}
+            onPointerCancel={endChatResize}
+            onDoubleClick={() => setChatWidth(CHAT_DEFAULT_WIDTH)}
+            className={`group absolute left-0 top-0 z-40 h-full w-2 cursor-col-resize touch-none transition-colors ${isResizingChat ? "bg-[#2323a8]/40" : "bg-transparent hover:bg-[#2323a8]/20"
+              }`}
+          >
+            {/* Grip hint: a small vertical bar that fades in on hover. */}
+            <span
+              className={`pointer-events-none absolute left-1/2 top-1/2 h-10 w-1 -translate-x-1/2 -translate-y-1/2 rounded-full bg-[#0a2240]/30 transition-opacity ${isResizingChat ? "opacity-100" : "opacity-0 group-hover:opacity-100"
+                }`}
+            />
+          </div>
+        )}
+        <div style={{ width: chatWidth, height: "100%", opacity: isChatOpen ? 1 : 0, transition: "opacity 300ms 100ms" }}>
           <Chat
             onBotSpeech={handleBotSpeech}
             onClearSpeech={clearSpeech}
             language={lang}
             localeReady={localeReady}
+            footerText={footerText}
             onClose={() => setIsChatOpen(false)}
             avatarName={AVATAR_NAME}
             isPttHoveredOrPressed={isPttPressed}

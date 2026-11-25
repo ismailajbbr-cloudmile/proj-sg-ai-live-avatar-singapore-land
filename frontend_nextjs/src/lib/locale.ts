@@ -38,6 +38,20 @@ export interface LocaleStrings {
     privacy: string;
     /** Status line while a background job (web search, image, video) runs */
     working: (operation: string) => string;
+    /** Labels for the live automated-browser card */
+    browse: {
+      title: string;
+      running: string;
+      finished: string;
+      stopped: string;
+      opening: string;
+      noPage: string;
+      tapToExpand: string;
+      task: string;
+      steps: string;
+      close: string;
+      step: (n: number) => string;
+    };
   };
   idle: {
     title: string;
@@ -98,7 +112,22 @@ const STRINGS: Record<Locale, LocaleStrings> = {
           create_image: "Creating image…",
           edit_image: "Editing image…",
           create_video: "Creating video… this can take a minute or two",
+          browse_web: "Opening the browser…",
+          continue_browse: "Working in the browser…",
         } as Record<string, string>)[operation] ?? "Working on it…",
+      browse: {
+        title: "Browser",
+        running: "Browsing",
+        finished: "Finished",
+        stopped: "Stopped",
+        opening: "Opening the page…",
+        noPage: "No page yet",
+        tapToExpand: "Tap the page to watch in full size",
+        task: "Task",
+        steps: "Steps",
+        close: "Close",
+        step: (n) => `Step ${n}`,
+      },
     },
     idle: {
       title: "Still there?",
@@ -158,7 +187,22 @@ const STRINGS: Record<Locale, LocaleStrings> = {
           create_image: "正在生成图片…",
           edit_image: "正在编辑图片…",
           create_video: "正在生成视频…可能需要一两分钟",
+          browse_web: "正在打开浏览器…",
+          continue_browse: "正在浏览器中操作…",
         } as Record<string, string>)[operation] ?? "正在处理…",
+      browse: {
+        title: "浏览器",
+        running: "浏览中",
+        finished: "已完成",
+        stopped: "已停止",
+        opening: "正在打开页面…",
+        noPage: "暂无页面",
+        tapToExpand: "点击页面可放大观看",
+        task: "任务",
+        steps: "步骤",
+        close: "关闭",
+        step: (n) => `第 ${n} 步`,
+      },
     },
     idle: {
       title: "还在吗？",

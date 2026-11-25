@@ -87,8 +87,107 @@ MEDIA_TOOLS = [
     },
 ]
 
-BACKGROUND_OPERATIONS = {"web_search", "create_image", "edit_image", "create_video"}
+BACKGROUND_OPERATIONS = {
+    "web_search",
+    "create_image",
+    "edit_image",
+    "create_video",
+    "browse_web",
+    "continue_browse",
+}
+
+# Handled inside the same chat turn: they read or stop an existing browser job.
+BROWSE_INLINE_TOOLS = {"get_browse_screen", "stop_browse"}
+
+BROWSE_TOOLS = [
+    {
+        "type": "function",
+        "function": {
+            "name": "browse_web",
+            "description": (
+                "Open a real browser and do a multi-step web task (search on a site, open pages, "
+                "click through a site, fill a form, read what a page shows). Use only when the "
+                "visitor explicitly asks to use the browser or browse a website, not for simple "
+                "facts you can look up with web_search."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "What to accomplish in the browser, in one clear sentence.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short label for this browser job, as the visitor would say it.",
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "One-sentence summary for later reference.",
+                    },
+                    "start_url": {
+                        "type": "string",
+                        "description": "Optional first URL. Defaults to Google.",
+                    },
+                },
+                "required": ["goal", "title", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "continue_browse",
+            "description": (
+                "Do more in the browser on the page where the last browser job ended. Use for a "
+                "follow-up click, search, or page change on the same site instead of starting over."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "The next browser instruction.",
+                    },
+                    "title": {"type": "string", "description": "Short label for this step."},
+                    "description": {
+                        "type": "string",
+                        "description": "One-sentence summary for later reference.",
+                    },
+                },
+                "required": ["goal", "title", "description"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_browse_screen",
+            "description": (
+                "Read the latest browser screenshot: page URL, status, outcome, and a short "
+                "description of what is on screen. Use when the visitor asks what they are "
+                "looking at or what the browser shows. Never guess page content."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "stop_browse",
+            "description": (
+                "Stop the browser job that is still running. Use when the visitor says stop, "
+                "cancel, or never mind while the browser is working."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+]
 
 
-def chat_tools(*, web_search: bool) -> list[dict]:
-    return [WEB_SEARCH_TOOL, *MEDIA_TOOLS] if web_search else list(MEDIA_TOOLS)
+def chat_tools(*, web_search: bool, browse: bool = False) -> list[dict]:
+    tools = [WEB_SEARCH_TOOL] if web_search else []
+    tools = [*tools, *MEDIA_TOOLS]
+    if browse:
+        tools = [*tools, *BROWSE_TOOLS]
+    return tools

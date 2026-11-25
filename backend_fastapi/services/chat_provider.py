@@ -15,15 +15,19 @@ async def stream_chat_response(
     language: str = "en-US",
     *,
     followup: bool = False,
+    owner: str = "",
 ) -> AsyncIterator[str | dict]:
     """Yield reply text, plus dict events such as job_request.
 
     followup=True means message is an automatic job result, not visitor input.
+    owner scopes in-memory background jobs, including browser sessions.
     """
     if uses_alibaba():
         from services.alibaba_chat import stream_qwen_response
 
-        async for chunk in stream_qwen_response(message, history, language, followup=followup):
+        async for chunk in stream_qwen_response(
+            message, history, language, followup=followup, owner=owner
+        ):
             yield chunk
         return
 

@@ -6,6 +6,7 @@ import { KIOSK_CHAT_ENTRY_KEY } from "@/lib/kioskChatGate";
 import { getLocaleStrings } from "@/lib/locale";
 import ReactMarkdown from "react-markdown";
 import type { VisemeFrame, AvatarGesture } from "@/types/viseme";
+import BrowserActivity, { type BrowseActivity, type BrowseStep } from "@/components/BrowserActivity";
 
 interface Message {
   id: number;
@@ -34,6 +35,8 @@ interface ChatProps {
   speechEndCallbackRef?: React.MutableRefObject<(() => void) | null>;
   /** False until parent reads sessionStorage locale after mount (avoids SSR hydration mismatch) */
   localeReady?: boolean;
+  /** Optional free text pill under the input (config FOOTER_TEXT). Empty hides it. */
+  footerText?: string;
 }
 
 declare global {
@@ -59,6 +62,29 @@ const GESTURE_PREFIX_RE = /^(idle|nod|shake|tilt|lookup|excited)(\s+|$)/i;
 
 const JOB_POLL_INTERVAL_MS = 3000;
 const JOB_POLL_TIMEOUT_MS = 10 * 60 * 1000;
+/** Browser jobs publish a screenshot, so they are polled faster than other jobs. */
+const BROWSE_POLL_INTERVAL_MS = 1500;
+const BROWSE_OPERATIONS = new Set(["browse_web", "continue_browse"]);
+
+interface BrowseJobStatus {
+  status?: string;
+  browse?: {
+    title?: string;
+    step?: number;
+    url?: string;
+    last_intent?: string;
+    summary?: string;
+    steps?: BrowseStep[];
+    mimeType?: string;
+    data?: string;
+  };
+}
+
+function browseStatusLabel(status?: string): BrowseActivity["status"] {
+  if (status === "done") return "done";
+  if (status === "failed") return "failed";
+  return "running";
+}
 
 /** Strip a leading gesture token if the model leaked it into visible text. */
 function stripLeadingGesture(text: string): string {
@@ -154,6 +180,7 @@ export default function Chat({
   onRecordingStatusChange,
   onThinkingChange,
   speechEndCallbackRef,
+  footerText = "",
 }: ChatProps) {
   const router = useRouter();
   const initialLang = getAvailableLanguages(language)[0];
@@ -211,9 +238,12 @@ export default function Chat({
     onThinkingChange?.(isThinking);
   }, [isThinking, onThinkingChange]);
 
-  // ── Background jobs (web search, image, video) ────────────────────────────
+  // ── Background jobs (web search, image, video, browser) ───────────────────
   // The bot replies first; when a job finishes we send a hidden follow-up so it announces the result.
   const [runningJobs, setRunningJobs] = useState<{ id: string; operation: string }[]>([]);
+  const [browseActivity, setBrowseActivity] = useState<BrowseActivity | null>(null);
+  // Message the live browser card sits after, so later questions appear below it.
+  const [browseAnchorId, setBrowseAnchorId] = useState<number | null>(null);
   const readyJobsRef = useRef<string[]>([]);
   const isThinkingRef = useRef(false);
   const unmountedRef = useRef(false);
@@ -232,7 +262,80 @@ export default function Chat({
     if (!isThinking) flushReadyJobs();
   }, [isThinking, flushReadyJobs]);
 
-  const pollJob = useCallback((jobId: string, operation: string) => {
+  /** Browser job: poll often so the live screenshot follows the automation. */
+  const pollBrowseJob = useCallback((jobId: string, operation: string, anchorId?: number) => {
+    setBrowseAnchorId(anchorId ?? null);
+    setBrowseActivity({
+      id: jobId,
+      operation,
+      status: "running",
+      title: "",
+      url: "",
+      step: 0,
+      lastIntent: "",
+      summary: "",
+      previewUrl: "",
+      steps: [],
+    });
+    const startedAt = Date.now();
+    const tick = async () => {
+      if (unmountedRef.current) return;
+      let status = "running";
+      try {
+        const res = await fetch(`/api/jobs/${encodeURIComponent(jobId)}`, { cache: "no-store" });
+        if (res.ok) {
+          const data = (await res.json()) as BrowseJobStatus;
+          status = data.status ?? "running";
+          const browse = data.browse;
+          if (browse) {
+            setBrowseActivity((prev) => {
+              if (!prev || prev.id !== jobId) return prev;
+              return {
+                ...prev,
+                status: browseStatusLabel(status),
+                title: browse.title || prev.title,
+                url: browse.url || prev.url,
+                step: browse.step ?? prev.step,
+                lastIntent: browse.last_intent || prev.lastIntent,
+                summary: browse.summary || prev.summary,
+                previewUrl: browse.data
+                  ? `data:${browse.mimeType || "image/jpeg"};base64,${browse.data}`
+                  : prev.previewUrl,
+                steps: browse.steps ?? prev.steps,
+              };
+            });
+          }
+        } else if (res.status === 404 || res.status === 401) {
+          status = "gone";
+        }
+      } catch {
+        // Network blip — retry on the next tick
+      }
+      if (status === "running" && Date.now() - startedAt < JOB_POLL_TIMEOUT_MS) {
+        setTimeout(tick, BROWSE_POLL_INTERVAL_MS);
+        return;
+      }
+      if (status === "running") {
+        setBrowseActivity((prev) =>
+          prev && prev.id === jobId ? { ...prev, status: "failed", summary: "Timed out." } : prev
+        );
+        return;
+      }
+      if (status === "gone") {
+        setBrowseActivity((prev) => (prev && prev.id === jobId ? null : prev));
+        return;
+      }
+      readyJobsRef.current.push(jobId);
+      flushReadyJobs();
+    };
+    setTimeout(tick, 600);
+  }, [flushReadyJobs]);
+
+  const pollJob = useCallback((jobId: string, operation: string, anchorId?: number) => {
+    if (BROWSE_OPERATIONS.has(operation)) {
+      pollBrowseJob(jobId, operation, anchorId);
+      return;
+    }
     setRunningJobs((prev) => [...prev, { id: jobId, operation }]);
     const startedAt = Date.now();
     const tick = async () => {
@@ -256,7 +359,7 @@ export default function Chat({
       }
     };
     setTimeout(tick, JOB_POLL_INTERVAL_MS);
-  }, [flushReadyJobs]);
+  }, [flushReadyJobs, pollBrowseJob]);
 
   // ── Speech-ended callback — registered with parent so it can notify us ───
   // No dependency array: always captures the latest handleSend without stale closure.
@@ -373,7 +476,7 @@ export default function Chat({
     // Media URLs travel with history so the server can edit the latest picture later.
     const history = messages.map(msg => ({
       role: msg.sender,
-      text: [msg.text, ...(msg.media ?? []).map(m => `[${m.kind}] ${m.url}`)].filter(Boolean).join("\n"),
+      text: [msg.text, ...(msg.media ?? []).filter(m => m.url.startsWith("http")).map(m => `[${m.kind}] ${m.url}`)].filter(Boolean).join("\n"),
     }));
 
     try {
@@ -488,7 +591,7 @@ export default function Chat({
               });
               messageAdded = true;
             } else if (parsed.type === "job" && parsed.id) {
-              pollJob(String(parsed.id), String(parsed.operation ?? ""));
+              pollJob(String(parsed.id), String(parsed.operation ?? ""), botMessageId);
             } else if (parsed.type === "show_qr") {
               setMessages((prev) =>
                 prev.map((m) => m.id === botMessageId ? { ...m, showQr: true } : m)
@@ -675,8 +778,14 @@ export default function Chat({
                   </p>
                 </div>
               )}
+              {browseActivity && browseAnchorId === message.id && (
+                <BrowserActivity activity={browseActivity} strings={localeStrings.chat} />
+              )}
             </div>
           ))}
+          {browseActivity && !messages.some((m) => m.id === browseAnchorId) && (
+            <BrowserActivity activity={browseActivity} strings={localeStrings.chat} />
+          )}
           {runningJobs.map((job) => (
             <div key={job.id} className="flex items-center gap-2 ml-9 text-[12px] text-gray-500">
               <span className="w-2 h-2 rounded-full bg-[#0a2240] animate-pulse" />
@@ -734,7 +843,14 @@ export default function Chat({
           </button>
         </div>
 
-        <p className="mt-3 text-center text-[10px] font-medium text-gray-400">
+        {footerText && (
+          <div className="mt-3 flex items-center justify-center">
+            <span className="rounded-full border border-gray-200 bg-gray-50 px-2.5 py-0.5 text-center text-[10px] font-medium text-[#0a2240]/70">
+              {footerText}
+            </span>
+          </div>
+        )}
+        <p className={`${footerText ? "mt-1.5" : "mt-3"} text-center text-[10px] font-medium text-gray-400`}>
           {localeStrings.chat.privacy}
         </p>
       </div>

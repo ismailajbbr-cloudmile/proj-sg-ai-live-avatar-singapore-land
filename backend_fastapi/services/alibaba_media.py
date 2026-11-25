@@ -11,8 +11,14 @@ from services.media import MediaAsset
 
 logger = logging.getLogger(__name__)
 
-_VIDEO_TIMEOUT_S = 240
+_VIDEO_TIMEOUT_S = 300
 _POLL_INTERVAL_S = 5
+
+# Wan 2.7 image takes a resolution preset (1K / 2K / 4K). 2K is the same price per
+# image as 1K and still fits the 2K cap that image editing imposes.
+_IMAGE_SIZE = "2K"
+# Demo-length clips; Wan 3.0 accepts 2-30 s and bills per second.
+_VIDEO_DURATION_S = 8
 
 
 class AlibabaMedia:
@@ -26,7 +32,7 @@ class AlibabaMedia:
                         {"role": "user", "content": [{"text": prompt}]},
                     ]
                 },
-                "parameters": {"size": "1024*1024", "n": 1, "watermark": False},
+                "parameters": {"size": _IMAGE_SIZE, "n": 1, "watermark": False},
             },
         )
         return MediaAsset(kind="image", url=_image_url(body))
@@ -44,7 +50,7 @@ class AlibabaMedia:
                         }
                     ]
                 },
-                "parameters": {"size": "1024*1024", "n": 1, "watermark": False},
+                "parameters": {"size": _IMAGE_SIZE, "n": 1, "watermark": False},
             },
         )
         return MediaAsset(kind="image", url=_image_url(body))
@@ -57,7 +63,7 @@ class AlibabaMedia:
         )
         video_input: dict = {"prompt": prompt}
         if image_url:
-            # Wan 2.7+ image-to-video takes the first frame as a typed media item.
+            # Wan 3.0 image-to-video takes the first frame as a typed media item.
             video_input["media"] = [{"type": "first_frame", "url": image_url}]
         submitted = await _post_json(
             "/api/v1/services/aigc/video-generation/video-synthesis",
@@ -65,8 +71,9 @@ class AlibabaMedia:
                 "model": model,
                 "input": video_input,
                 "parameters": {
+                    # Wan 3.0 adds generated dialogue and background sound by default; keep it.
                     "resolution": "720P" if image_url else "480P",
-                    "duration": 5,
+                    "duration": _VIDEO_DURATION_S,
                     "prompt_extend": False,
                     "watermark": False,
                 },
@@ -98,7 +105,7 @@ async def _post_json(path: str, payload: dict, extra_headers: dict | None = None
     headers = auth_headers()
     if extra_headers:
         headers.update(extra_headers)
-    async with httpx.AsyncClient(timeout=120.0) as client:
+    async with httpx.AsyncClient(timeout=180.0) as client:
         response = await client.post(f"{api_host()}{path}", headers=headers, json=payload)
         if response.status_code >= 400:
             raise RuntimeError(f"Alibaba media failed ({response.status_code}): {response.text[:500]}")

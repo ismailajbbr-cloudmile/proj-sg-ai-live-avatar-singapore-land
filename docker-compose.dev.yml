@@ -57,6 +57,9 @@ services:
     volumes:
       - ./frontend_nextjs:/app
       - /app/node_modules
+      # Keep dev build output out of the host .next — a host `npm run build`
+      # leaves production artifacts that wedge `next dev` at 'Compiling middleware'
+      - /app/.next
       - ${HOME}/.config/gcloud/application_default_credentials.json:/app/credentials/application_default_credentials.json:ro
     dns:
       - 8.8.8.8

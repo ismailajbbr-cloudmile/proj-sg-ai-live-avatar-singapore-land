@@ -1,4 +1,5 @@
 import json
+import re
 import secrets
 import uuid
 from datetime import UTC, datetime
@@ -22,13 +23,20 @@ router = APIRouter()
 
 VALID_GESTURES = {"idle", "nod", "shake", "tilt", "lookup", "excited"}
 
+# Models sometimes repeat the tool name before the gesture line. It is noise, not speech.
+_TOOL_NAME_PREFIX = re.compile(
+    r"^(?:browse_web|continue_browse|get_browse_screen|stop_browse|web_search|"
+    r"create_image|edit_image|create_video)\b[\s:,.-]*",
+    re.IGNORECASE,
+)
+
 
 def _parse_leading_gesture(text: str) -> tuple[str, str]:
     """Parse optional leading gesture token. Returns (gesture, visible_text)."""
     if not text:
         return "idle", ""
 
-    stripped = text.lstrip("\ufeff")
+    stripped = _TOOL_NAME_PREFIX.sub("", text.lstrip("\ufeff"), count=1)
     if not stripped:
         return "idle", text
 
@@ -195,7 +203,11 @@ async def chat(
                     yield sse({"type": "media", "kind": job.media.kind, "url": job.media.url})
 
                 async for item in stream_chat_response(
-                    message, gemini_history, language=language, followup=job is not None
+                    message,
+                    gemini_history,
+                    language=language,
+                    followup=job is not None,
+                    owner=kiosk_username,
                 ):
                     if isinstance(item, dict):
                         if item.get("type") == "job_request":
@@ -207,8 +219,9 @@ async def chat(
                             )
                             yield sse({"type": "job", "id": started.id, "operation": started.operation})
                             continue
-                        if item.get("type") == "media" and item.get("url"):
-                            media_lines.append(f"[{item.get('kind', 'image')}] {item['url']}")
+                        url = str(item.get("url") or "")
+                        if item.get("type") == "media" and url and not url.startswith("data:"):
+                            media_lines.append(f"[{item.get('kind', 'image')}] {url}")
                         yield sse(item)
                         continue
                     chunk_text = item
